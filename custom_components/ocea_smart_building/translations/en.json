@@ -1,0 +1,41 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Ocea Smart Building",
+        "description": "Connect to your Ocea resident space.\nThe local ID is visible in the URL of your resident space (e.g. 1912980).",
+        "data": {
+          "email": "Email",
+          "password": "Password",
+          "local_id": "Local ID"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authentication",
+        "description": "Your credentials have expired. Please reconnect.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid credentials",
+      "cannot_connect": "Cannot connect to Ocea server",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This account is already configured"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "eau_froide": {
+        "name": "Cold water"
+      },
+      "eau_chaude": {
+        "name": "Hot water"
+      }
+    }
+  }
+}

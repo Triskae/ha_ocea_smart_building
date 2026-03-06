@@ -1,0 +1,11 @@
+{
+  "domain": "ocea_smart_building",
+  "name": "Ocea Smart Building",
+  "codeowners": ["@triskae"],
+  "config_flow": true,
+  "documentation": "https://github.com/Triskae/ha_ocea_smart_building",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/Triskae/ha_ocea_smart_building/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}

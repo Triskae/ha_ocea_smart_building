@@ -1,0 +1,41 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Ocea Smart Building",
+        "description": "Connectez-vous à votre espace résident Ocea.\nL'identifiant du local est visible dans l'URL de votre espace (ex: 1912980).",
+        "data": {
+          "email": "Email",
+          "password": "Mot de passe",
+          "local_id": "Identifiant du local"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Ré-authentification Ocea",
+        "description": "Vos identifiants ont expiré, veuillez vous reconnecter.",
+        "data": {
+          "email": "Email",
+          "password": "Mot de passe"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Identifiants invalides",
+      "cannot_connect": "Impossible de se connecter au serveur Ocea",
+      "unknown": "Erreur inattendue"
+    },
+    "abort": {
+      "already_configured": "Ce compte est déjà configuré"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "eau_froide": {
+        "name": "Eau froide"
+      },
+      "eau_chaude": {
+        "name": "Eau chaude"
+      }
+    }
+  }
+}
