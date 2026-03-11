@@ -3,11 +3,10 @@
     "step": {
       "user": {
         "title": "Ocea Smart Building",
-        "description": "Connect to your Ocea resident space.\nThe local ID is visible in the URL of your resident space (e.g. 1912980).",
+        "description": "Connect to your Ocea resident space.",
         "data": {
           "email": "Email",
-          "password": "Password",
-          "local_id": "Local ID"
+          "password": "Password"
         }
       },
       "reauth_confirm": {
@@ -22,6 +21,7 @@
     "error": {
       "invalid_auth": "Invalid credentials",
       "cannot_connect": "Cannot connect to Ocea server",
+      "no_occupation": "No dwelling found for this account",
       "unknown": "Unexpected error"
     },
     "abort": {

@@ -3,11 +3,10 @@
     "step": {
       "user": {
         "title": "Ocea Smart Building",
-        "description": "Connectez-vous à votre espace résident Ocea.\nL'identifiant du local est visible dans l'URL de votre espace (ex: 1912980).",
+        "description": "Connectez-vous à votre espace résident Ocea.",
         "data": {
           "email": "Email",
-          "password": "Mot de passe",
-          "local_id": "Identifiant du local"
+          "password": "Mot de passe"
         }
       },
       "reauth_confirm": {
@@ -22,6 +21,7 @@
     "error": {
       "invalid_auth": "Identifiants invalides",
       "cannot_connect": "Impossible de se connecter au serveur Ocea",
+      "no_occupation": "Aucun logement trouvé pour ce compte",
       "unknown": "Erreur inattendue"
     },
     "abort": {

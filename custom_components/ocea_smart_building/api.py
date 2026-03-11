@@ -55,7 +55,7 @@ class OceaApiClient:
         self,
         email: str,
         password: str,
-        local_id: str,
+        local_id: str = "",
     ) -> None:
         """Initialize the API client."""
         self._email = email
@@ -309,14 +309,19 @@ class OceaApiClient:
 
         return resp.json()
 
+    def get_resident(self) -> dict:
+        """Get resident info including occupations (logementId)."""
+        return self._api_get("/api/v1/resident")
+
     def get_consumptions(self) -> list[dict[str, str]]:
         """Get water consumption data."""
         return self._api_get(f"/api/v1/local/{self._local_id}/dashboard/consos")
 
-    def validate_credentials(self) -> bool:
-        """Test credentials by attempting authentication."""
-        try:
-            self.authenticate()
-            return True
-        except OceaAuthError:
-            return False
+    def validate_credentials(self) -> dict:
+        """Test credentials and return resident data with logementId.
+
+        Raises OceaAuthError if credentials are invalid.
+        Returns the resident API response.
+        """
+        self.authenticate()
+        return self.get_resident()

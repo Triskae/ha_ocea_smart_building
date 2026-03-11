@@ -34,28 +34,39 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             client = OceaApiClient(
                 email=user_input[CONF_EMAIL],
                 password=user_input[CONF_PASSWORD],
-                local_id=user_input[CONF_LOCAL_ID],
             )
 
             try:
-                valid = await self.hass.async_add_executor_job(
+                resident_data = await self.hass.async_add_executor_job(
                     client.validate_credentials
                 )
-                if not valid:
-                    errors["base"] = "invalid_auth"
             except OceaAuthError:
                 errors["base"] = "invalid_auth"
+                resident_data = None
             except Exception:
                 _LOGGER.exception("Unexpected error during config flow")
                 errors["base"] = "unknown"
+                resident_data = None
             finally:
                 client.close()
 
-            if not errors:
-                return self.async_create_entry(
-                    title=f"Ocea - {user_input[CONF_LOCAL_ID]}",
-                    data=user_input,
-                )
+            if not errors and resident_data:
+                occupations = resident_data.get("occupations", [])
+                if not occupations:
+                    errors["base"] = "no_occupation"
+                else:
+                    local_id = occupations[0].get("logementId", "")
+                    resident = resident_data.get("resident", {})
+                    name = resident.get("prenom", "")
+
+                    return self.async_create_entry(
+                        title=f"Ocea - {name}" if name else f"Ocea - {local_id}",
+                        data={
+                            CONF_EMAIL: user_input[CONF_EMAIL],
+                            CONF_PASSWORD: user_input[CONF_PASSWORD],
+                            CONF_LOCAL_ID: local_id,
+                        },
+                    )
 
         return self.async_show_form(
             step_id="user",
@@ -63,7 +74,6 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required(CONF_EMAIL): str,
                     vol.Required(CONF_PASSWORD): str,
-                    vol.Required(CONF_LOCAL_ID): str,
                 }
             ),
             errors=errors,
@@ -90,19 +100,17 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
             try:
-                valid = await self.hass.async_add_executor_job(
+                await self.hass.async_add_executor_job(
                     client.validate_credentials
                 )
-                if valid:
-                    return self.async_update_reload_and_abort(
-                        reauth_entry,
-                        data={
-                            **reauth_entry.data,
-                            CONF_EMAIL: user_input[CONF_EMAIL],
-                            CONF_PASSWORD: user_input[CONF_PASSWORD],
-                        },
-                    )
-                errors["base"] = "invalid_auth"
+                return self.async_update_reload_and_abort(
+                    reauth_entry,
+                    data={
+                        **reauth_entry.data,
+                        CONF_EMAIL: user_input[CONF_EMAIL],
+                        CONF_PASSWORD: user_input[CONF_PASSWORD],
+                    },
+                )
             except OceaAuthError:
                 errors["base"] = "invalid_auth"
             except Exception:
