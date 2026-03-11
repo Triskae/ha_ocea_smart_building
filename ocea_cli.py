@@ -3,7 +3,7 @@
 CLI script to authenticate with Ocea Smart Building and fetch water consumption.
 
 Usage:
-    python3 ocea_cli.py --email your@email.com --password yourpass --local-id 1912980
+    python3 ocea_cli.py --email your@email.com --password yourpass
 
 Dependencies:
     pip3 install requests
@@ -279,15 +279,16 @@ def authenticate(
     return tokens
 
 
-# ─── API call ─────────────────────────────────────────────────────────────────
+# ─── API helpers ──────────────────────────────────────────────────────────────
 
-def fetch_consumptions(
+def api_get(
     session: requests.Session,
     access_token: str,
-    local_id: str,
-) -> list[dict]:
-    url = f"{API_BASE}/api/v1/local/{local_id}/dashboard/consos"
-    resp = session.get(
+    path: str,
+) -> requests.Response:
+    """Make an authenticated GET request, return raw response."""
+    url = f"{API_BASE}{path}"
+    return session.get(
         url,
         headers={
             "Authorization": f"Bearer {access_token}",
@@ -297,6 +298,26 @@ def fetch_consumptions(
             "User-Agent": UA,
         },
     )
+
+
+def fetch_resident(
+    session: requests.Session,
+    access_token: str,
+) -> dict:
+    """Fetch resident info including occupations (logementId)."""
+    resp = api_get(session, access_token, "/api/v1/resident")
+    if resp.status_code != 200:
+        log.error("Resident API failed — HTTP %d:\n%s", resp.status_code, resp.text[:500])
+        raise SystemExit(1)
+    return resp.json()
+
+
+def fetch_consumptions(
+    session: requests.Session,
+    access_token: str,
+    local_id: str,
+) -> list[dict]:
+    resp = api_get(session, access_token, f"/api/v1/local/{local_id}/dashboard/consos")
     if resp.status_code != 200:
         log.error("API failed — HTTP %d:\n%s", resp.status_code, resp.text[:500])
         raise SystemExit(1)
@@ -321,8 +342,33 @@ def main(args: argparse.Namespace) -> None:
             print("\nrefresh_token:")
             print(tokens["refresh_token"][:80] + "…")
 
-    print(f"\nFetching consumption for local_id={args.local_id}…\n")
-    data = fetch_consumptions(session, tokens["access_token"], args.local_id)
+    # Auto-discover local_id from /api/v1/resident
+    resident_data = fetch_resident(session, tokens["access_token"])
+
+    resident = resident_data.get("resident", {})
+    prenom = resident.get("prenom", "?")
+    nom = resident.get("nom", "?")
+    print(f"\nResident: {prenom} {nom}")
+
+    occupations = resident_data.get("occupations", [])
+    if not occupations:
+        log.error("No occupations found for this account!")
+        raise SystemExit(1)
+
+    local_id = str(occupations[0].get("logementId", ""))
+    if not local_id:
+        log.error("No logementId in first occupation!")
+        raise SystemExit(1)
+
+    print(f"Local ID: {local_id}")
+
+    if len(occupations) > 1:
+        print(f"\nNote: {len(occupations)} occupations found, using the first one.")
+        for i, occ in enumerate(occupations):
+            print(f"  [{i}] logementId={occ.get('logementId')} — {occ.get('adresse', '?')}")
+
+    print(f"\nFetching consumption for local_id={local_id}…\n")
+    data = fetch_consumptions(session, tokens["access_token"], local_id)
 
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
@@ -346,7 +392,6 @@ if __name__ == "__main__":
     )
     parser.add_argument("--email", required=True)
     parser.add_argument("--password", required=True)
-    parser.add_argument("--local-id", required=True)
     parser.add_argument("--dump-tokens", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
 
