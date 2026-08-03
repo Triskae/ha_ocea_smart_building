@@ -6,12 +6,18 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigFlow
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
+from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers.selector import (
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
+from requests import RequestException
 
-from .api import OceaApiClient, OceaAuthError
-from .const import CONF_LOCAL_ID, DOMAIN
+from .api import OceaApiClient, OceaApiError, OceaAuthError
+from .const import CONF_LOCAL_ID, DOMAIN, PASSWORD_NOT_CHANGED
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,7 +29,7 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    ) -> FlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
 
@@ -79,15 +85,13 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_reauth(
-        self, entry_data: dict[str, Any]
-    ) -> ConfigFlowResult:
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
         """Handle reauth."""
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    ) -> FlowResult:
         """Handle reauth confirmation."""
         errors: dict[str, str] = {}
 
@@ -100,9 +104,7 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
             try:
-                await self.hass.async_add_executor_job(
-                    client.validate_credentials
-                )
+                await self.hass.async_add_executor_job(client.validate_credentials)
                 return self.async_update_reload_and_abort(
                     reauth_entry,
                     data={
@@ -125,6 +127,99 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required(CONF_EMAIL): str,
                     vol.Required(CONF_PASSWORD): str,
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle reconfiguration of the integration."""
+        reconfigure_entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            email = user_input[CONF_EMAIL]
+            password = user_input[CONF_PASSWORD]
+            if password == PASSWORD_NOT_CHANGED:
+                password = reconfigure_entry.data[CONF_PASSWORD]
+
+            client = OceaApiClient(
+                email=email,
+                password=password,
+                local_id=reconfigure_entry.data[CONF_LOCAL_ID],
+            )
+
+            try:
+                resident_data = await self.hass.async_add_executor_job(
+                    client.validate_credentials
+                )
+            except OceaAuthError:
+                errors["base"] = "invalid_auth"
+            except (OceaApiError, RequestException):
+                errors["base"] = "cannot_connect"
+            except Exception:  # noqa: BLE001
+                # Avoid logging exception details that could contain credentials.
+                _LOGGER.error("Unexpected error during reconfiguration")
+                errors["base"] = "unknown"
+            else:
+                occupations = resident_data.get("occupations", [])
+                if not occupations:
+                    errors["base"] = "no_occupation"
+                else:
+                    local_id = occupations[0].get("logementId", "")
+                    resident = resident_data.get("resident", {})
+                    name = resident.get("prenom", "")
+                    title = f"Ocea - {name}" if name else f"Ocea - {local_id}"
+                    unique_id = email.lower()
+                    existing_entry = (
+                        self.hass.config_entries.async_entry_for_domain_unique_id(
+                            DOMAIN, unique_id
+                        )
+                    )
+                    if (
+                        existing_entry is not None
+                        and existing_entry.entry_id != reconfigure_entry.entry_id
+                    ):
+                        return self.async_abort(reason="already_configured")
+
+                    return self.async_update_reload_and_abort(
+                        reconfigure_entry,
+                        unique_id=unique_id,
+                        title=title,
+                        data_updates={
+                            CONF_EMAIL: email,
+                            CONF_PASSWORD: password,
+                            CONF_LOCAL_ID: local_id,
+                        },
+                        reload_even_if_entry_is_unchanged=False,
+                    )
+            finally:
+                client.close()
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_EMAIL,
+                        default=reconfigure_entry.data[CONF_EMAIL],
+                    ): TextSelector(
+                        TextSelectorConfig(
+                            type=TextSelectorType.EMAIL,
+                            autocomplete="email",
+                        )
+                    ),
+                    vol.Required(
+                        CONF_PASSWORD,
+                        default=PASSWORD_NOT_CHANGED,
+                    ): TextSelector(
+                        TextSelectorConfig(
+                            type=TextSelectorType.PASSWORD,
+                            autocomplete="current-password",
+                        )
+                    ),
                 }
             ),
             errors=errors,

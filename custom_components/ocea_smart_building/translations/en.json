@@ -16,6 +16,18 @@
           "email": "Email",
           "password": "Password"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Ocea Smart Building",
+        "description": "Change the credentials used to access your Ocea resident space. The current password remains hidden and will be kept unless you replace it.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        },
+        "data_description": {
+          "email": "Email address used for your Ocea resident space.",
+          "password": "Enter a new password only to replace the one currently stored."
+        }
       }
     },
     "error": {
@@ -25,7 +37,8 @@
       "unknown": "Unexpected error"
     },
     "abort": {
-      "already_configured": "This account is already configured"
+      "already_configured": "This account is already configured",
+      "reconfigure_successful": "Reconfiguration was successful"
     }
   },
   "entity": {

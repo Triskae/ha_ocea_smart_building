@@ -8,7 +8,7 @@ import json
 import logging
 import re
 import secrets
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -19,8 +19,8 @@ from .const import (
     B2C_CLIENT_ID,
     B2C_REDIRECT_URI,
     B2C_SCOPE,
-    B2C_TOKEN,
     B2C_TENANT,
+    B2C_TOKEN,
     UA,
 )
 
