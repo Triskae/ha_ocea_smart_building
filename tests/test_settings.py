@@ -10,6 +10,7 @@ from types import ModuleType
 INTEGRATION_PATH = (
     Path(__file__).parents[1] / "custom_components" / "ocea_smart_building"
 )
+CI_WORKFLOW_PATH = Path(__file__).parents[1] / ".github" / "workflows" / "ci.yml"
 RELEASE_WORKFLOW_PATH = (
     Path(__file__).parents[1] / ".github" / "workflows" / "release.yml"
 )
@@ -48,3 +49,17 @@ def test_release_workflow_is_tag_only() -> None:
     assert 'gh release create "$GITHUB_REF_NAME"' in workflow
     assert "previous_tag=$(git describe --tags" in workflow
     assert "/compare/$previous_tag...$GITHUB_REF_NAME" in workflow
+
+
+def test_ci_workflow_validates_main_and_pull_requests() -> None:
+    """Test CI runs the required checks without publishing releases."""
+    workflow = CI_WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert "push:\n    branches:\n      - main" in workflow
+    assert "pull_request:\n    branches:\n      - main" in workflow
+    assert 'python-version: "3.14.2"' in workflow
+    assert "--with homeassistant==2026.7.3" in workflow
+    assert "python -m pytest -q" in workflow
+    assert "uvx ruff check custom_components tests" in workflow
+    assert "python -m compileall -q custom_components tests ocea_cli.py" in workflow
+    assert "gh release create" not in workflow

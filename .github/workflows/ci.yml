@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.14.2"
+          enable-cache: true
+
+      - name: Run Home Assistant tests
+        run: >-
+          uv run --python 3.14.2
+          --with homeassistant==2026.7.3
+          --with pytest-homeassistant-custom-component
+          python -m pytest -q
+
+      - name: Run Ruff
+        run: uvx ruff check custom_components tests
+
+      - name: Check Python compilation
+        run: >-
+          uv run --python 3.14.2
+          python -m compileall -q custom_components tests ocea_cli.py
+
+      - name: Validate JSON files
+        run: |
+          python3 -m json.tool custom_components/ocea_smart_building/manifest.json >/dev/null
+          python3 -m json.tool custom_components/ocea_smart_building/strings.json >/dev/null
+          python3 -m json.tool custom_components/ocea_smart_building/translations/en.json >/dev/null
+          python3 -m json.tool custom_components/ocea_smart_building/translations/fr.json >/dev/null
+
+      - name: Check patch formatting
+        run: git diff --check HEAD^ HEAD

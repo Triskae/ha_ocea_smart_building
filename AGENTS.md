@@ -92,7 +92,8 @@ python3 -m json.tool custom_components/ocea_smart_building/translations/fr.json 
 git diff --check
 ```
 
-- Validate `.github/workflows/release.yml` whenever it changes.
+- Validate `.github/workflows/ci.yml` and `.github/workflows/release.yml` whenever
+  either workflow changes.
 - Run Ruff checks when Ruff is available.
 - Add or update tests for changed API, config-flow, translation, CLI, version, and
   release behavior.
