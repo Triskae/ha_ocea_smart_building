@@ -16,7 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class OceaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, float]]):
-    """Manage fetching Ocea water consumption data."""
+    """Manage fetching Ocea consumption data."""
 
     def __init__(self, hass: HomeAssistant, client: OceaApiClient) -> None:
         """Initialize the coordinator."""

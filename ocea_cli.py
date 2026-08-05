@@ -380,6 +380,7 @@ def main(args: argparse.Namespace) -> None:
         label = (
             "🔵 Eau froide" if fluide == "EauFroide"
             else "🔴 Eau chaude" if fluide == "EauChaude"
+            else "🔥 Chauffage thermique" if fluide == "CETC"
             else fluide
         )
         print(f"  {label}: {valeur} {unite}")

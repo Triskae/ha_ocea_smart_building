@@ -11,7 +11,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfVolume
+from homeassistant.const import UnitOfEnergy, UnitOfVolume
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -50,6 +50,17 @@ SENSOR_TYPES: tuple[OceaSensorEntityDescription, ...] = (
         icon="mdi:water-thermometer",
         suggested_display_precision=2,
     ),
+    OceaSensorEntityDescription(
+        key="cetc",
+        data_key="cetc",
+        translation_key="cetc",
+        name="Chauffage thermique",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        icon="mdi:radiator",
+        suggested_display_precision=2,
+    ),
 )
 
 
@@ -79,7 +90,7 @@ async def async_setup_entry(
 class OceaWaterSensor(
     CoordinatorEntity[OceaDataUpdateCoordinator], SensorEntity
 ):
-    """Representation of an Ocea water consumption sensor."""
+    """Representation of an Ocea consumption sensor."""
 
     entity_description: OceaSensorEntityDescription
     _attr_has_entity_name = True

@@ -48,6 +48,9 @@
       },
       "eau_chaude": {
         "name": "Hot water"
+      },
+      "cetc": {
+        "name": "Thermal heating"
       }
     }
   }
