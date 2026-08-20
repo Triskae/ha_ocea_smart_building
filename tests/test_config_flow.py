@@ -101,6 +101,7 @@ async def test_successful_reconfiguration(
         patch.object(hass.config_entries, "async_schedule_reload") as schedule_reload,
     ):
         client_class.return_value.validate_credentials.return_value = resident_data
+        client_class.return_value.resolve_accessible_local.return_value = "local-456"
         result = await _async_init_reconfigure(hass, config_entry)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -174,6 +175,7 @@ async def test_reconfigure_preserves_secrets(
         patch.object(hass.config_entries, "async_schedule_reload"),
     ):
         client_class.return_value.validate_credentials.return_value = RESIDENT_DATA
+        client_class.return_value.resolve_accessible_local.return_value = OLD_LOCAL_ID
         result = await _async_init_reconfigure(hass, config_entry)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -205,6 +207,7 @@ async def test_reconfigure_without_changes_does_not_reload(
         patch.object(hass.config_entries, "async_schedule_reload") as schedule_reload,
     ):
         client_class.return_value.validate_credentials.return_value = RESIDENT_DATA
+        client_class.return_value.resolve_accessible_local.return_value = OLD_LOCAL_ID
         result = await _async_init_reconfigure(hass, config_entry)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],

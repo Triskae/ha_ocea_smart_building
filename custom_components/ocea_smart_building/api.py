@@ -8,7 +8,10 @@ import json
 import logging
 import re
 import secrets
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -33,6 +36,11 @@ class OceaAuthError(Exception):
 
 class OceaApiError(Exception):
     """API communication error."""
+
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        """Initialize an API error with an optional HTTP status."""
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def _generate_pkce() -> tuple[str, str]:
@@ -305,8 +313,38 @@ class OceaApiClient:
             return self._api_get(path, retry_auth=False)
 
         if resp.status_code != 200:
-            raise OceaApiError(f"API error: HTTP {resp.status_code} — {resp.text[:200]}")
+            raise OceaApiError(
+                f"API error: HTTP {resp.status_code} — {resp.text[:200]}",
+                status_code=resp.status_code,
+            )
 
+        return resp.json()
+
+    def _api_post(self, path: str, payload: dict, retry_auth: bool = True) -> any:
+        """Make an authenticated JSON POST request to the Ocea API."""
+        if not self._access_token:
+            self.authenticate()
+        resp = self._session.post(
+            f"{API_BASE}{path}",
+            headers={
+                "Authorization": f"Bearer {self._access_token}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Origin": B2C_REDIRECT_URI,
+                "Referer": f"{B2C_REDIRECT_URI}/",
+                "User-Agent": UA,
+            },
+            json=payload,
+            timeout=30,
+        )
+        if resp.status_code == 401 and retry_auth:
+            self.refresh_access_token()
+            return self._api_post(path, payload, retry_auth=False)
+        if resp.status_code != 200:
+            raise OceaApiError(
+                f"API error: HTTP {resp.status_code} — {resp.text[:200]}",
+                status_code=resp.status_code,
+            )
         return resp.json()
 
     def get_resident(self) -> dict:
@@ -316,6 +354,150 @@ class OceaApiClient:
     def get_consumptions(self) -> list[dict[str, str]]:
         """Get water consumption data."""
         return self._api_get(f"/api/v1/local/{self._local_id}/dashboard/consos")
+
+    def get_precise_consumptions(self) -> list[dict[str, object]]:
+        """Return precise month totals, latest values, and leak estimates."""
+        today = datetime.now(ZoneInfo("Europe/Paris")).date()
+        month_start = today.replace(day=1)
+        payload = {
+            "debut": f"{month_start.isoformat()}T00:00:00.000Z",
+            "fin": f"{today.isoformat()}T23:59:59.999Z",
+            "granularity": "Day",
+        }
+        result: list[dict[str, object]] = []
+        for fluid in ("EauFroide", "EauChaude", "Cetc"):
+            data = self._api_post(
+                f"/api/v1/local/{self._local_id}/conso/{fluid}", payload
+            )
+            total = Decimal(0)
+            latest_date = ""
+            latest_value = Decimal(0)
+            leak_date = ""
+            leak_value: Decimal | None = None
+            for item in data.get("consommations", []):
+                try:
+                    value = Decimal(str(item.get("valeur", 0)).replace(",", "."))
+                    item_date = str(item.get("date", ""))
+                    total += value
+                    if item_date > latest_date:
+                        latest_date = item_date
+                        latest_value = value
+                    if (
+                        fluid in ("EauFroide", "EauChaude")
+                        and item.get("fuiteEstimee") is not None
+                        and item_date >= leak_date
+                    ):
+                        leak_value = Decimal(
+                            str(item["fuiteEstimee"]).replace(",", ".")
+                        )
+                        leak_date = item_date
+                except (InvalidOperation, TypeError, ValueError):
+                    _LOGGER.warning("Ignoring invalid %s consumption value", fluid)
+            result.append({"fluide": fluid, "valeur": str(total), "precise": True})
+            if latest_date:
+                result.append(
+                    {
+                        "fluide": fluid,
+                        "valeur": str(latest_value),
+                        "precise_daily": True,
+                        "date": latest_date,
+                    }
+                )
+            if leak_value is not None:
+                result.append(
+                    {
+                        "fluide": fluid,
+                        "valeur": str(leak_value),
+                        "leak_estimate": True,
+                        "date": leak_date,
+                    }
+                )
+        return result
+
+    def get_daily_history(
+        self, start_iso: str
+    ) -> dict[str, list[tuple[str, str]]]:
+        """Fetch daily history, split into yearly requests for API reliability."""
+        today = datetime.now(ZoneInfo("Europe/Paris")).date()
+        start = date.fromisoformat(start_iso)
+        history: dict[str, list[tuple[str, str]]] = {}
+        for fluid in ("EauFroide", "EauChaude", "Cetc"):
+            daily: dict[str, str] = {}
+            empty_years = 0
+            for year in range(today.year, start.year - 1, -1):
+                chunk_start = date(year, 1, 1)
+                chunk_end = min(date(year, 12, 31), today)
+                data = self._api_post(
+                    f"/api/v1/local/{self._local_id}/conso/{fluid}",
+                    {
+                        "debut": f"{chunk_start.isoformat()}T00:00:00.000Z",
+                        "fin": f"{chunk_end.isoformat()}T23:59:59.999Z",
+                        "granularity": "Day",
+                    },
+                )
+                items = data.get("consommations", [])
+                empty_years = empty_years + 1 if not items else 0
+                for item in items:
+                    try:
+                        day = str(item.get("date", ""))[:10]
+                        value = Decimal(
+                            str(item.get("valeur", 0)).replace(",", ".")
+                        )
+                    except (InvalidOperation, TypeError, ValueError):
+                        continue
+                    if day:
+                        daily[day] = str(value)
+                # Resident histories are contiguous in practice. Two complete
+                # empty years before the oldest data mark the end of history.
+                if daily and empty_years >= 2:
+                    break
+            history[fluid] = sorted(daily.items())
+        return history
+
+    def resolve_accessible_local(
+        self,
+        resident_data: dict,
+        preferred_local_id: str | None = None,
+    ) -> str:
+        """Return the first dwelling whose dashboard is accessible.
+
+        Ocea accounts may retain stale occupations. A dwelling listed by the
+        resident endpoint is therefore accepted only after its dashboard has
+        been queried successfully. The currently configured dwelling is tried
+        first when it is still present in the account.
+        """
+        local_ids = [
+            str(occupation.get("logementId", "")).strip()
+            for occupation in resident_data.get("occupations", [])
+            if occupation.get("logementId")
+        ]
+        if not local_ids:
+            raise OceaApiError("No occupation found for this account")
+
+        candidates = list(dict.fromkeys(local_ids))
+        preferred = str(preferred_local_id or "").strip()
+        if preferred in candidates:
+            candidates.remove(preferred)
+            candidates.insert(0, preferred)
+
+        original_local_id = self._local_id
+        try:
+            for local_id in candidates:
+                self._local_id = local_id
+                try:
+                    self.get_consumptions()
+                except OceaApiError as err:
+                    if err.status_code == 403:
+                        continue
+                    raise
+                return local_id
+        finally:
+            self._local_id = original_local_id
+
+        raise OceaApiError(
+            "No accessible occupation found for this account",
+            status_code=403,
+        )
 
     def validate_credentials(self) -> dict:
         """Test credentials and return resident data with logementId.

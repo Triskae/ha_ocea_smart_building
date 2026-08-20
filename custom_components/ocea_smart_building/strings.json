@@ -34,6 +34,7 @@
       "invalid_auth": "Identifiants invalides",
       "cannot_connect": "Impossible de se connecter au serveur Ocea",
       "no_occupation": "Aucun logement trouvé pour ce compte",
+      "no_accessible_occupation": "Aucun logement accessible trouvé pour ce compte",
       "unknown": "Erreur inattendue"
     },
     "abort": {
@@ -51,6 +52,21 @@
       },
       "cetc": {
         "name": "Chauffage thermique"
+      },
+      "eau_froide_precise": {
+        "name": "Eau froide précise"
+      },
+      "eau_chaude_precise": {
+        "name": "Eau chaude précise"
+      },
+      "cetc_precise": {
+        "name": "Chauffage thermique précis"
+      },
+      "fuite_eau_froide": {
+        "name": "Fuite estimée eau froide"
+      },
+      "fuite_eau_chaude": {
+        "name": "Fuite estimée eau chaude"
       }
     }
   }
