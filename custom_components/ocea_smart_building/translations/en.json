@@ -34,6 +34,7 @@
       "invalid_auth": "Invalid credentials",
       "cannot_connect": "Cannot connect to Ocea server",
       "no_occupation": "No dwelling found for this account",
+      "no_accessible_occupation": "No accessible dwelling found for this account",
       "unknown": "Unexpected error"
     },
     "abort": {
@@ -51,6 +52,21 @@
       },
       "cetc": {
         "name": "Thermal heating"
+      },
+      "eau_froide_precise": {
+        "name": "Precise cold water"
+      },
+      "eau_chaude_precise": {
+        "name": "Precise hot water"
+      },
+      "cetc_precise": {
+        "name": "Precise thermal heating"
+      },
+      "fuite_eau_froide": {
+        "name": "Estimated cold-water leak"
+      },
+      "fuite_eau_chaude": {
+        "name": "Estimated hot-water leak"
       }
     }
   }

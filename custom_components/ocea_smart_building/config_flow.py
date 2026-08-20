@@ -49,30 +49,43 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             except OceaAuthError:
                 errors["base"] = "invalid_auth"
                 resident_data = None
-            except Exception:
-                _LOGGER.exception("Unexpected error during config flow")
+            except (OceaApiError, RequestException):
+                errors["base"] = "cannot_connect"
+                resident_data = None
+            except Exception:  # noqa: BLE001
+                _LOGGER.error("Unexpected error during config flow")
                 errors["base"] = "unknown"
                 resident_data = None
-            finally:
-                client.close()
-
-            if not errors and resident_data:
-                occupations = resident_data.get("occupations", [])
-                if not occupations:
+            else:
+                if not resident_data.get("occupations", []):
                     errors["base"] = "no_occupation"
                 else:
-                    local_id = occupations[0].get("logementId", "")
-                    resident = resident_data.get("resident", {})
-                    name = resident.get("prenom", "")
-
-                    return self.async_create_entry(
-                        title=f"Ocea - {name}" if name else f"Ocea - {local_id}",
-                        data={
-                            CONF_EMAIL: user_input[CONF_EMAIL],
-                            CONF_PASSWORD: user_input[CONF_PASSWORD],
-                            CONF_LOCAL_ID: local_id,
-                        },
-                    )
+                    try:
+                        local_id = await self.hass.async_add_executor_job(
+                            client.resolve_accessible_local,
+                            resident_data,
+                        )
+                    except OceaApiError as err:
+                        errors["base"] = (
+                            "no_accessible_occupation"
+                            if err.status_code == 403
+                            else "cannot_connect"
+                        )
+                    else:
+                        resident = resident_data.get("resident", {})
+                        name = resident.get("prenom", "")
+                        return self.async_create_entry(
+                            title=(
+                                f"Ocea - {name}" if name else f"Ocea - {local_id}"
+                            ),
+                            data={
+                                CONF_EMAIL: user_input[CONF_EMAIL],
+                                CONF_PASSWORD: user_input[CONF_PASSWORD],
+                                CONF_LOCAL_ID: local_id,
+                            },
+                        )
+            finally:
+                client.close()
 
         return self.async_show_form(
             step_id="user",
@@ -104,17 +117,30 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
             try:
-                await self.hass.async_add_executor_job(client.validate_credentials)
+                resident_data = await self.hass.async_add_executor_job(
+                    client.validate_credentials
+                )
+                local_id = await self.hass.async_add_executor_job(
+                    client.resolve_accessible_local,
+                    resident_data,
+                    reauth_entry.data[CONF_LOCAL_ID],
+                )
                 return self.async_update_reload_and_abort(
                     reauth_entry,
-                    data={
-                        **reauth_entry.data,
+                    data_updates={
                         CONF_EMAIL: user_input[CONF_EMAIL],
                         CONF_PASSWORD: user_input[CONF_PASSWORD],
+                        CONF_LOCAL_ID: local_id,
                     },
                 )
             except OceaAuthError:
                 errors["base"] = "invalid_auth"
+            except OceaApiError as err:
+                errors["base"] = (
+                    "no_accessible_occupation"
+                    if err.status_code == 403
+                    else "cannot_connect"
+                )
             except Exception:
                 _LOGGER.exception("Unexpected error during reauth")
                 errors["base"] = "unknown"
@@ -168,33 +194,45 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                 if not occupations:
                     errors["base"] = "no_occupation"
                 else:
-                    local_id = occupations[0].get("logementId", "")
-                    resident = resident_data.get("resident", {})
-                    name = resident.get("prenom", "")
-                    title = f"Ocea - {name}" if name else f"Ocea - {local_id}"
-                    unique_id = email.lower()
-                    existing_entry = (
-                        self.hass.config_entries.async_entry_for_domain_unique_id(
-                            DOMAIN, unique_id
+                    try:
+                        local_id = await self.hass.async_add_executor_job(
+                            client.resolve_accessible_local,
+                            resident_data,
+                            reconfigure_entry.data[CONF_LOCAL_ID],
                         )
-                    )
-                    if (
-                        existing_entry is not None
-                        and existing_entry.entry_id != reconfigure_entry.entry_id
-                    ):
-                        return self.async_abort(reason="already_configured")
+                    except OceaApiError as err:
+                        errors["base"] = (
+                            "no_accessible_occupation"
+                            if err.status_code == 403
+                            else "cannot_connect"
+                        )
+                    else:
+                        resident = resident_data.get("resident", {})
+                        name = resident.get("prenom", "")
+                        title = f"Ocea - {name}" if name else f"Ocea - {local_id}"
+                        unique_id = email.lower()
+                        existing_entry = (
+                            self.hass.config_entries.async_entry_for_domain_unique_id(
+                                DOMAIN, unique_id
+                            )
+                        )
+                        if (
+                            existing_entry is not None
+                            and existing_entry.entry_id != reconfigure_entry.entry_id
+                        ):
+                            return self.async_abort(reason="already_configured")
 
-                    return self.async_update_reload_and_abort(
-                        reconfigure_entry,
-                        unique_id=unique_id,
-                        title=title,
-                        data_updates={
-                            CONF_EMAIL: email,
-                            CONF_PASSWORD: password,
-                            CONF_LOCAL_ID: local_id,
-                        },
-                        reload_even_if_entry_is_unchanged=False,
-                    )
+                        return self.async_update_reload_and_abort(
+                            reconfigure_entry,
+                            unique_id=unique_id,
+                            title=title,
+                            data_updates={
+                                CONF_EMAIL: email,
+                                CONF_PASSWORD: password,
+                                CONF_LOCAL_ID: local_id,
+                            },
+                            reload_even_if_entry_is_unchanged=False,
+                        )
             finally:
                 client.close()
 
