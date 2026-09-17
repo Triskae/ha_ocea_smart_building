@@ -8,11 +8,12 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from homeassistant.config_entries import SOURCE_RECONFIGURE
+from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_RECONFIGURE
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult, FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from requests import RequestException
 
 from custom_components.ocea_smart_building.api import OceaApiError, OceaAuthError
 from custom_components.ocea_smart_building.const import (
@@ -61,6 +62,103 @@ async def _async_init_reconfigure(
             "entry_id": config_entry.entry_id,
         },
     )
+
+
+async def _async_init_reauth(
+    hass: HomeAssistant, config_entry: MockConfigEntry
+) -> FlowResult:
+    """Start a reauthentication flow for an existing config entry."""
+    return await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": SOURCE_REAUTH,
+            "entry_id": config_entry.entry_id,
+        },
+    )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_successful_reauthentication_preserves_entry_data(
+    hass: HomeAssistant, config_entry: MockConfigEntry
+) -> None:
+    """Test reauth updates credentials without replacing hidden entry data."""
+    with (
+        patch(
+            "custom_components.ocea_smart_building.config_flow.OceaApiClient"
+        ) as client_class,
+        patch.object(hass.config_entries, "async_schedule_reload") as schedule_reload,
+    ):
+        client_class.return_value.validate_credentials.return_value = RESIDENT_DATA
+        result = await _async_init_reauth(hass, config_entry)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_EMAIL: OLD_EMAIL,
+                CONF_PASSWORD: "new-secret",
+            },
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert config_entry.data[CONF_PASSWORD] == "new-secret"
+    assert config_entry.data["access_token"] == "hidden-token"
+    assert config_entry.unique_id == OLD_EMAIL
+    schedule_reload.assert_called_once_with(config_entry.entry_id)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_reauthentication_rejects_a_different_account(
+    hass: HomeAssistant, config_entry: MockConfigEntry
+) -> None:
+    """Test reauth cannot replace the configured account identity."""
+    with patch(
+        "custom_components.ocea_smart_building.config_flow.OceaApiClient"
+    ) as client_class:
+        client_class.return_value.validate_credentials.return_value = RESIDENT_DATA
+        result = await _async_init_reauth(hass, config_entry)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_EMAIL: "other@example.com",
+                CONF_PASSWORD: "new-secret",
+            },
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "unique_id_mismatch"
+    assert config_entry.data[CONF_PASSWORD] == OLD_PASSWORD
+
+
+@pytest.mark.parametrize(
+    ("exception", "expected_error"),
+    [
+        (OceaApiError("server unavailable"), "cannot_connect"),
+        (RequestException("network unavailable"), "cannot_connect"),
+    ],
+)
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_reauthentication_connection_errors(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    exception: Exception,
+    expected_error: str,
+) -> None:
+    """Test reauth maps API and network failures to connection errors."""
+    with patch(
+        "custom_components.ocea_smart_building.config_flow.OceaApiClient"
+    ) as client_class:
+        client_class.return_value.validate_credentials.side_effect = exception
+        result = await _async_init_reauth(hass, config_entry)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_EMAIL: OLD_EMAIL,
+                CONF_PASSWORD: "new-secret",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": expected_error}
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
