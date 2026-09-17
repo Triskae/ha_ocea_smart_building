@@ -69,5 +69,11 @@
     "meter": {
       "name": "Ocea - Meter {meter_identity}"
     }
+  },
+  "system_health": {
+    "info": {
+      "can_reach_server": "Reachable Ocea server",
+      "last_update_success": "Last update successful"
+    }
   }
 }
