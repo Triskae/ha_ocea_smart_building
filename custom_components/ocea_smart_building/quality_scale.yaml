@@ -22,7 +22,7 @@ rules:
     comment: The integration does not provide conditions.
   docs-high-level-description: done
   docs-installation-instructions: done
-  docs-removal-instructions: todo
+  docs-removal-instructions: done
   entity-event-setup:
     status: exempt
     comment: Entities use coordinator updates and do not subscribe to external events.
@@ -37,7 +37,7 @@ rules:
   action-exceptions:
     status: exempt
     comment: The integration does not provide service actions.
-  config-entry-unloading: todo
+  config-entry-unloading: done
   docs-configuration-parameters:
     status: exempt
     comment: The integration does not provide an options flow.
@@ -51,7 +51,7 @@ rules:
 
   # Gold
   devices: done
-  diagnostics: todo
+  diagnostics: done
   discovery-update-info:
     status: exempt
     comment: The cloud service does not provide network discovery information.
@@ -65,8 +65,8 @@ rules:
     status: exempt
     comment: The integration uses resident-account data rather than targeting specific devices.
   docs-supported-functions: done
-  docs-troubleshooting: todo
-  docs-use-cases: todo
+  docs-troubleshooting: done
+  docs-use-cases: done
   dynamic-devices: todo
   entity-category:
     status: exempt

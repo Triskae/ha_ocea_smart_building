@@ -163,7 +163,9 @@ async def async_setup_entry(
         if new_entities:
             async_add_entities(new_entities, update_before_add=True)
 
-    coordinator.async_add_listener(_async_add_new_leak_entities)
+    config_entry.async_on_unload(
+        coordinator.async_add_listener(_async_add_new_leak_entities)
+    )
 
 
 class OceaWaterSensor(OceaEntity, SensorEntity):
