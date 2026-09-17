@@ -8,7 +8,7 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import AbortFlow, FlowResult
 from homeassistant.helpers.selector import (
     TextSelector,
     TextSelectorConfig,
@@ -49,8 +49,11 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             except OceaAuthError:
                 errors["base"] = "invalid_auth"
                 resident_data = None
-            except Exception:
-                _LOGGER.exception("Unexpected error during config flow")
+            except (OceaApiError, RequestException):
+                errors["base"] = "cannot_connect"
+                resident_data = None
+            except Exception:  # noqa: BLE001
+                _LOGGER.error("Unexpected error during config flow")
                 errors["base"] = "unknown"
                 resident_data = None
             finally:
@@ -105,18 +108,23 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
 
             try:
                 await self.hass.async_add_executor_job(client.validate_credentials)
+                await self.async_set_unique_id(user_input[CONF_EMAIL].lower())
+                self._abort_if_unique_id_mismatch()
                 return self.async_update_reload_and_abort(
                     reauth_entry,
-                    data={
-                        **reauth_entry.data,
+                    data_updates={
                         CONF_EMAIL: user_input[CONF_EMAIL],
                         CONF_PASSWORD: user_input[CONF_PASSWORD],
                     },
                 )
             except OceaAuthError:
                 errors["base"] = "invalid_auth"
-            except Exception:
-                _LOGGER.exception("Unexpected error during reauth")
+            except (OceaApiError, RequestException):
+                errors["base"] = "cannot_connect"
+            except AbortFlow:
+                raise
+            except Exception:  # noqa: BLE001
+                _LOGGER.error("Unexpected error during reauth")
                 errors["base"] = "unknown"
             finally:
                 client.close()

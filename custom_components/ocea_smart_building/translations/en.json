@@ -38,7 +38,8 @@
     },
     "abort": {
       "already_configured": "This account is already configured",
-      "reconfigure_successful": "Reconfiguration was successful"
+      "reconfigure_successful": "Reconfiguration was successful",
+      "reauth_successful": "Re-authentication was successful"
     }
   },
   "entity": {

@@ -38,7 +38,8 @@
     },
     "abort": {
       "already_configured": "Ce compte est déjà configuré",
-      "reconfigure_successful": "La reconfiguration a réussi"
+      "reconfigure_successful": "La reconfiguration a réussi",
+      "reauth_successful": "La ré-authentification a réussi"
     }
   },
   "entity": {
