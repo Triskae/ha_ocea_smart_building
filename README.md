@@ -46,6 +46,12 @@ Settings → Devices & Services → Add Integration → "Ocea Smart Building"
 
 Your dwelling is automatically detected from your Ocea account.
 
+You can add multiple Ocea accounts as separate Home Assistant entries, but the
+same email address can only be configured once. The integration's System Health
+page aggregates update status and per-meter reading availability across all
+loaded entries. After a failed update, cached readings for that account are
+counted as unavailable until its next successful update.
+
 ### Water meters
 
 Ocea exposes two levels of consumption data:
@@ -90,6 +96,9 @@ action:
 The integration polls Ocea every five hours. Leak detection therefore follows
 that refresh interval and is not real-time.
 
+For example, the individual meter sensors can help compare consumption between
+rooms, while the dwelling totals can be tracked in the Energy dashboard.
+
 The integration discovers the available PDS and meter serial numbers during
 setup, then refreshes each meter's consumption for the current calendar month.
 If one meter is temporarily unavailable, its entity remains present but has no
@@ -124,11 +133,29 @@ consumption will be counted twice.
 
 ## Troubleshooting
 
+### The integration cannot connect or asks for authentication
+
+Check that you can sign in to the Ocea resident portal and that Home Assistant
+can access the internet. If your credentials have changed, use the integration's
+**Reconfigure** action to update them. If a meter is missing after replacement,
+reload the integration to rediscover the available meters. The System Health
+page can help identify connection or meter-reading failures.
+
+Debug logging can also be enabled:
+
 ```yaml
 logger:
   logs:
     custom_components.ocea_smart_building: debug
 ```
+
+## Removing the integration
+
+In Settings → Devices & Services, open Ocea Smart Building and select
+**Delete** from the integration menu. This removes its configuration and
+entities from Home Assistant; it does not delete your Ocea account.
+If installed through HACS, uninstall it there as well and restart Home Assistant
+to remove the integration files.
 
 <!-- Badge references -->
 [hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg

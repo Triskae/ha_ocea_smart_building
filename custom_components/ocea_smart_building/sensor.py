@@ -10,13 +10,12 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy, UnitOfVolume
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_LOCAL_ID, DOMAIN, WATER_FLUID_SENSOR_KEYS
-from .coordinator import OceaDataUpdateCoordinator
+from .const import CONF_LOCAL_ID, WATER_FLUID_SENSOR_KEYS
+from .coordinator import OceaConfigEntry, OceaDataUpdateCoordinator
 from .entity import (
     OceaEntity,
     local_device_info,
@@ -82,11 +81,11 @@ SENSOR_TYPES: tuple[OceaSensorEntityDescription, ...] = (
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry,
+    config_entry: OceaConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Ocea Smart Building sensors from a config entry."""
-    coordinator: OceaDataUpdateCoordinator = hass.data[DOMAIN][config_entry.entry_id]
+    coordinator = config_entry.runtime_data
     local_id = config_entry.data[CONF_LOCAL_ID]
     descriptions = {description.key: description for description in SENSOR_TYPES}
 
@@ -110,13 +109,13 @@ async def async_setup_entry(
         }
         for meter in coordinator.data.meters.values():
             pds = meter.meter.pds
-            description = fluid_descriptions.get(pds.fluid)
-            if description is None:
+            meter_description = fluid_descriptions.get(pds.fluid)
+            if meter_description is None:
                 continue
             entities.append(
                 OceaMeterSensor(
                     coordinator=coordinator,
-                    description=description,
+                    description=meter_description,
                     local_id=local_id,
                     meter=meter.meter,
                 )
@@ -163,7 +162,9 @@ async def async_setup_entry(
         if new_entities:
             async_add_entities(new_entities, update_before_add=True)
 
-    coordinator.async_add_listener(_async_add_new_leak_entities)
+    config_entry.async_on_unload(
+        coordinator.async_add_listener(_async_add_new_leak_entities)
+    )
 
 
 class OceaWaterSensor(OceaEntity, SensorEntity):
