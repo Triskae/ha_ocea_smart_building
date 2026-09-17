@@ -273,6 +273,10 @@ can access the internet. If your credentials have changed, use the integration's
 reload the integration to rediscover the available meters. The System Health
 page can help identify connection or meter-reading failures.
 
+You can download diagnostics from the integration menu in Settings → Devices &
+Services. They omit credentials and dwelling or meter identifiers, but include
+consumption data; review the file before sharing it.
+
 Debug logging can also be enabled:
 
 ```yaml
