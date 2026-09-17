@@ -118,7 +118,7 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
         self,
         hass: HomeAssistant,
         client: OceaApiClient,
-        config_entry: ConfigEntry,
+        config_entry: OceaConfigEntry,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -200,3 +200,6 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
             valeur = float(item.get("valeur", "0").replace(",", "."))
             totals[WATER_FLUID_SENSOR_KEYS.get(fluide, fluide.lower())] = valeur
         return totals
+
+
+OceaConfigEntry = ConfigEntry[OceaDataUpdateCoordinator]

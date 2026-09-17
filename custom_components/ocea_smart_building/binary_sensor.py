@@ -6,12 +6,11 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_LOCAL_ID, DOMAIN
-from .coordinator import OceaDataUpdateCoordinator, OceaMeterReading
+from .const import CONF_LOCAL_ID
+from .coordinator import OceaConfigEntry, OceaDataUpdateCoordinator, OceaMeterReading
 from .entity import OceaEntity, meter_device_info, meter_entity_unique_id
 from .ocea import OceaMeter
 
@@ -20,11 +19,11 @@ PARALLEL_UPDATES = 0
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry,
+    config_entry: OceaConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up leak binary sensors for discovered water meters."""
-    coordinator: OceaDataUpdateCoordinator = hass.data[DOMAIN][config_entry.entry_id]
+    coordinator = config_entry.runtime_data
     local_id = config_entry.data[CONF_LOCAL_ID]
     readings = coordinator.data.meters.values() if coordinator.data else ()
 
