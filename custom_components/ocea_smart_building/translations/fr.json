@@ -53,5 +53,11 @@
         "name": "Chauffage thermique"
       }
     }
+  },
+  "system_health": {
+    "info": {
+      "can_reach_server": "Serveur Ocea joignable",
+      "last_update_success": "Dernière mise à jour réussie"
+    }
   }
 }
