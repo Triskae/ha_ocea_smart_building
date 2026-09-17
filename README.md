@@ -112,6 +112,10 @@ Open Settings → Devices & Services → Ocea Smart Building, then select the na
 - Credentials are validated with Ocea before changes are saved.
 - Home Assistant reloads the integration only when the validated configuration has actually changed.
 
+If Home Assistant requests reauthentication, sign in with the same Ocea
+account. To switch accounts, use **Reconfigure** instead. A successful
+reauthentication also refreshes the dwelling and entry name from the account.
+
 ## Energy dashboard
 
 Add the cold and hot water sensors in Settings → Dashboards → Energy → Water consumption. When available, the CETC heating sensor can also be added as an energy-consumption source.

@@ -9,7 +9,7 @@ import voluptuous as vol
 from aiohttp import ClientError
 from homeassistant.config_entries import ConfigFlow
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import AbortFlow, FlowResult
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.selector import (
     TextSelector,
@@ -53,6 +53,9 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             except OceaAuthError:
                 errors["base"] = "invalid_auth"
                 resident_data = None
+            except (OceaApiError, ClientError, TimeoutError):
+                errors["base"] = "cannot_connect"
+                resident_data = None
             except Exception:  # noqa: BLE001
                 _LOGGER.error("Unexpected error during config flow")
                 errors["base"] = "unknown"
@@ -60,7 +63,7 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             finally:
                 session.detach()
 
-            if not errors and resident_data:
+            if not errors and resident_data is not None:
                 occupations = resident_data.get("occupations", [])
                 if not occupations:
                     errors["base"] = "no_occupation"
@@ -82,8 +85,14 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_EMAIL): str,
-                    vol.Required(CONF_PASSWORD): str,
+                    vol.Required(CONF_EMAIL): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.EMAIL, autocomplete="email")
+                    ),
+                    vol.Required(CONF_PASSWORD): TextSelector(
+                        TextSelectorConfig(
+                            type=TextSelectorType.PASSWORD, autocomplete="current-password"
+                        )
+                    ),
                 }
             ),
             errors=errors,
@@ -113,29 +122,51 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
             try:
-                await client.validate_credentials()
-                return self.async_update_reload_and_abort(
-                    reauth_entry,
-                    data={
-                        **reauth_entry.data,
-                        CONF_EMAIL: user_input[CONF_EMAIL],
-                        CONF_PASSWORD: user_input[CONF_PASSWORD],
-                    },
-                )
+                resident_data = await client.validate_credentials()
+                await self.async_set_unique_id(user_input[CONF_EMAIL].lower())
+                self._abort_if_unique_id_mismatch()
             except OceaAuthError:
                 errors["base"] = "invalid_auth"
+            except (OceaApiError, ClientError, TimeoutError):
+                errors["base"] = "cannot_connect"
+            except AbortFlow:
+                raise
             except Exception:  # noqa: BLE001
                 _LOGGER.error("Unexpected error during reauth")
                 errors["base"] = "unknown"
             finally:
                 session.detach()
 
+            if not errors:
+                occupations = resident_data.get("occupations", [])
+                if not occupations:
+                    errors["base"] = "no_occupation"
+                else:
+                    local_id = occupations[0].get("logementId", "")
+                    resident = resident_data.get("resident", {})
+                    name = resident.get("prenom", "")
+                    return self.async_update_reload_and_abort(
+                        reauth_entry,
+                        title=f"Ocea - {name}" if name else f"Ocea - {local_id}",
+                        data_updates={
+                            CONF_EMAIL: user_input[CONF_EMAIL],
+                            CONF_PASSWORD: user_input[CONF_PASSWORD],
+                            CONF_LOCAL_ID: local_id,
+                        },
+                    )
+
         return self.async_show_form(
             step_id="reauth_confirm",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_EMAIL): str,
-                    vol.Required(CONF_PASSWORD): str,
+                    vol.Required(CONF_EMAIL): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.EMAIL, autocomplete="email")
+                    ),
+                    vol.Required(CONF_PASSWORD): TextSelector(
+                        TextSelectorConfig(
+                            type=TextSelectorType.PASSWORD, autocomplete="current-password"
+                        )
+                    ),
                 }
             ),
             errors=errors,

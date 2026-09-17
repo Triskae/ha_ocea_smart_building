@@ -7,6 +7,10 @@
         "data": {
           "email": "Email",
           "password": "Password"
+        },
+        "data_description": {
+          "email": "Email address used for your Ocea resident account.",
+          "password": "Password for your Ocea resident account."
         }
       },
       "reauth_confirm": {
@@ -15,6 +19,10 @@
         "data": {
           "email": "Email",
           "password": "Password"
+        },
+        "data_description": {
+          "email": "Email address of the configured Ocea account.",
+          "password": "Current password for your Ocea resident account."
         }
       },
       "reconfigure": {
@@ -38,7 +46,9 @@
     },
     "abort": {
       "already_configured": "This account is already configured",
-      "reconfigure_successful": "Reconfiguration was successful"
+      "unique_id_mismatch": "Use the configured Ocea account to re-authenticate.",
+      "reconfigure_successful": "Reconfiguration was successful",
+      "reauth_successful": "Re-authentication was successful"
     }
   },
   "entity": {
