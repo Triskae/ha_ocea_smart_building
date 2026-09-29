@@ -6,10 +6,13 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow
-from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
+from homeassistant.const import CONF_EMAIL, CONF_PASSWORD, CONF_SCAN_INTERVAL
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import (
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
@@ -17,7 +20,13 @@ from homeassistant.helpers.selector import (
 from requests import RequestException
 
 from .api import OceaApiClient, OceaApiError, OceaAuthError
-from .const import CONF_LOCAL_ID, DOMAIN, PASSWORD_NOT_CHANGED
+from .const import (
+    CONF_LOCAL_ID,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    PASSWORD_NOT_CHANGED,
+    SCAN_INTERVAL_CHOICES_HOURS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,6 +35,11 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Ocea Smart Building."""
 
     VERSION = 1
+
+    @staticmethod
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        """Get the options flow for this handler."""
+        return OceaOptionsFlowHandler()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -223,4 +237,42 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
+        )
+
+
+class OceaOptionsFlowHandler(OptionsFlow):
+    """Handle Ocea Smart Building options (scan interval)."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle the options step."""
+        if user_input is not None:
+            hours = int(user_input[CONF_SCAN_INTERVAL])
+            return self.async_create_entry(
+                data={CONF_SCAN_INTERVAL: hours * 3600}
+            )
+
+        current_seconds = self.config_entry.options.get(
+            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+        )
+        current_hours = str(current_seconds // 3600)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_SCAN_INTERVAL, default=current_hours
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                str(hours) for hours in SCAN_INTERVAL_CHOICES_HOURS
+                            ],
+                            mode=SelectSelectorMode.DROPDOWN,
+                            translation_key="scan_interval_hours",
+                        )
+                    ),
+                }
+            ),
         )

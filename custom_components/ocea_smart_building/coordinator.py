@@ -18,13 +18,18 @@ _LOGGER = logging.getLogger(__name__)
 class OceaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, float]]):
     """Manage fetching Ocea consumption data."""
 
-    def __init__(self, hass: HomeAssistant, client: OceaApiClient) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: OceaApiClient,
+        scan_interval_seconds: int = DEFAULT_SCAN_INTERVAL,
+    ) -> None:
         """Initialize the coordinator."""
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
+            update_interval=timedelta(seconds=scan_interval_seconds),
         )
         self.client = client
 

@@ -35,3 +35,6 @@ PASSWORD_NOT_CHANGED = "__**password_not_changed**__"
 
 # Defaults
 DEFAULT_SCAN_INTERVAL = 18000  # 5 hours
+
+# Scan interval choices offered in the options flow, in hours
+SCAN_INTERVAL_CHOICES_HOURS = (1, 2, 5, 12, 24)
