@@ -95,6 +95,7 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
         hass: HomeAssistant,
         client: OceaApiClient,
         config_entry: ConfigEntry,
+        scan_interval_seconds: int = DEFAULT_SCAN_INTERVAL,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -102,7 +103,7 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
             _LOGGER,
             name=DOMAIN,
             config_entry=config_entry,
-            update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
+            update_interval=timedelta(seconds=scan_interval_seconds),
         )
         self.client = client
         self._meters: dict[str, OceaMeter] = {}
