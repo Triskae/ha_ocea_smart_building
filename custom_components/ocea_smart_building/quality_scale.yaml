@@ -1,0 +1,88 @@
+rules:
+  # Bronze
+  action-setup:
+    status: exempt
+    comment: The integration does not register service actions.
+  appropriate-polling: done
+  brands: done
+  common-modules: done
+  config-flow-test-coverage: todo
+  config-flow: todo
+  dependency-transparency:
+    status: exempt
+    comment: No external requirement; requests is provided by Home Assistant.
+  docs-actions:
+    status: exempt
+    comment: The integration does not provide service actions.
+  docs-triggers:
+    status: exempt
+    comment: The integration does not provide triggers.
+  docs-conditions:
+    status: exempt
+    comment: The integration does not provide conditions.
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: todo
+  entity-event-setup:
+    status: exempt
+    comment: Entities are updated by the coordinator and subscribe to no events.
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: todo
+  test-before-configure: done
+  test-before-setup: done
+  unique-config-entry: done
+
+  # Silver
+  action-exceptions:
+    status: exempt
+    comment: The integration does not provide service actions.
+  config-entry-unloading: done
+  docs-configuration-parameters:
+    status: exempt
+    comment: The integration does not provide an options flow.
+  docs-installation-parameters: done
+  entity-unavailable: done
+  integration-owner: done
+  log-when-unavailable: todo
+  parallel-updates: done
+  reauthentication-flow: done
+  test-coverage: todo
+
+  # Gold
+  devices: done
+  diagnostics: todo
+  discovery-update-info:
+    status: exempt
+    comment: Cloud service; devices cannot be discovered on the network.
+  discovery:
+    status: exempt
+    comment: Cloud service; devices cannot be discovered on the network.
+  docs-data-update: done
+  docs-examples: done
+  docs-known-limitations: done
+  docs-supported-devices:
+    status: exempt
+    comment: Data comes from the resident account, not from specific devices.
+  docs-supported-functions: done
+  docs-troubleshooting: todo
+  docs-use-cases: done
+  dynamic-devices: todo
+  entity-category:
+    status: exempt
+    comment: All entities are primary measurements.
+  entity-device-class: done
+  entity-disabled-by-default:
+    status: exempt
+    comment: There are only a few entities and none is noisy.
+  entity-translations: done
+  exception-translations: todo
+  icon-translations: todo
+  reconfiguration-flow: done
+  repair-issues: todo
+  stale-devices: todo
+
+  # Platinum
+  async-dependency: todo
+  inject-websession: todo
+  strict-typing: todo

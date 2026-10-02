@@ -62,6 +62,20 @@ authentication behavior unless a change is explicitly required and tested.
 - Keep the local brand icon under
   `custom_components/ocea_smart_building/brand/icon.png`.
 
+## Quality scale tracking
+
+- `custom_components/ocea_smart_building/quality_scale.yaml` tracks the Home
+  Assistant integration quality scale rules (`done`, `todo`, or `exempt` with a
+  comment).
+- Update it in the same change whenever a rule becomes fully or partially
+  satisfied, or regresses (for example, reintroducing `hass.data` after
+  adopting `runtime_data`, removing `PARALLEL_UPDATES`, or dropping a test that
+  backs a `done` rule).
+- Mark a rule `done` only when the code and tests support it; keep `todo` for
+  partial compliance and explain the gap in the pull request.
+- Keep every rule listed through platinum and give each `exempt` rule a reason;
+  `tests/test_quality_scale.py` enforces this.
+
 ## Manual CLI rules
 
 - Keep `ocea_cli.py` usable without Home Assistant. Its only third-party runtime
