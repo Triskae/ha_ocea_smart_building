@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import secrets
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import requests
@@ -305,7 +306,41 @@ class OceaApiClient:
             return self._api_get(path, retry_auth=False)
 
         if resp.status_code != 200:
-            raise OceaApiError(f"API error: HTTP {resp.status_code} — {resp.text[:200]}")
+            raise OceaApiError(f"API error: HTTP {resp.status_code}")
+
+        return resp.json()
+
+    def _api_post(
+        self,
+        path: str,
+        payload: dict[str, object],
+        retry_auth: bool = True,
+    ) -> Any:
+        """Make an authenticated JSON POST request to the Ocea API."""
+        if not self._access_token:
+            self.authenticate()
+
+        resp = self._session.post(
+            f"{API_BASE}{path}",
+            headers={
+                "Authorization": f"Bearer {self._access_token}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Origin": B2C_REDIRECT_URI,
+                "Referer": f"{B2C_REDIRECT_URI}/",
+                "User-Agent": UA,
+            },
+            json=payload,
+            timeout=30,
+        )
+
+        if resp.status_code == 401 and retry_auth:
+            _LOGGER.debug("Token expired, refreshing")
+            self.refresh_access_token()
+            return self._api_post(path, payload, retry_auth=False)
+
+        if resp.status_code != 200:
+            raise OceaApiError(f"API error: HTTP {resp.status_code}")
 
         return resp.json()
 
@@ -316,6 +351,25 @@ class OceaApiClient:
     def get_consumptions(self) -> list[dict[str, str]]:
         """Get water consumption data."""
         return self._api_get(f"/api/v1/local/{self._local_id}/dashboard/consos")
+
+    def get_pds(self) -> list[dict[str, object]]:
+        """Get the configured dwelling's points of measurement."""
+        return self._api_get(f"/api/v1/local/{self._local_id}/pds")
+
+    def get_appareils(self, pds_ids: list[str]) -> list[dict[str, object]]:
+        """Get the devices associated with the given points of measurement."""
+        return self._api_post("/api/v1/local/appareils", {"pdsIds": pds_ids})
+
+    def get_pds_consumption(
+        self,
+        pds_id: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        """Get consumption data for one point of measurement."""
+        return self._api_post(
+            f"/api/v1/local/{self._local_id}/pds/{pds_id}/conso",
+            payload,
+        )
 
     def validate_credentials(self) -> dict:
         """Test credentials and return resident data with logementId.

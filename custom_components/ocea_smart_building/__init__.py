@@ -14,7 +14,7 @@ from .coordinator import OceaDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -25,8 +25,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         local_id=entry.data[CONF_LOCAL_ID],
     )
 
-    coordinator = OceaDataUpdateCoordinator(hass, client)
-    await coordinator.async_config_entry_first_refresh()
+    coordinator = OceaDataUpdateCoordinator(hass, client, entry)
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except BaseException:
+        client.close()
+        raise
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator
