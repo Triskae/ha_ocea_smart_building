@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -32,23 +32,47 @@ def _current_month_payload(today: date) -> dict[str, str]:
 
 def _build_meter_data(meter: OceaMeter, response: dict[str, Any]) -> OceaMeterReading:
     """Aggregate one PDS response while preserving its metadata."""
+    if not isinstance(response, dict):
+        raise OceaApiError("Invalid meter consumption response")
+
+    consumptions = response.get("consommations", [])
+    if not isinstance(consumptions, list):
+        raise OceaApiError("Invalid meter consumption list")
+
     total = Decimal(0)
     latest_date: str | None = None
     latest_item: dict[str, Any] | None = None
-    for item in response.get("consommations", []):
-        value = Decimal(str(item.get("valeur", 0)).replace(",", "."))
+    for item in consumptions:
+        if not isinstance(item, dict):
+            raise OceaApiError("Invalid meter consumption item")
+        try:
+            value = Decimal(str(item.get("valeur", 0)).replace(",", "."))
+        except (InvalidOperation, TypeError, ValueError) as err:
+            raise OceaApiError("Invalid meter consumption value") from err
+        if not value.is_finite():
+            raise OceaApiError("Invalid meter consumption value")
         total += value
         item_date = str(item.get("date", ""))
         if latest_date is None or item_date >= latest_date:
             latest_date = item_date
             latest_item = item
     latest_item = latest_item or {}
+    estimated_leak = latest_item.get("fuiteEstimee")
+    if estimated_leak is not None:
+        try:
+            leak_value = Decimal(str(estimated_leak).replace(",", "."))
+        except (InvalidOperation, TypeError, ValueError) as err:
+            raise OceaApiError("Invalid estimated leak value") from err
+        if not leak_value.is_finite():
+            raise OceaApiError("Invalid estimated leak value")
+        estimated_leak = float(leak_value)
+
     return OceaMeterReading(
         meter=meter,
         value=float(total),
         latest_date=latest_date,
         unit=response.get("unite"),
-        estimated_leak=latest_item.get("fuiteEstimee"),
+        estimated_leak=estimated_leak,
         consent=latest_item.get("consentement"),
         response_type=latest_item.get("type"),
     )
@@ -141,12 +165,11 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
         for pds_id, meter in self._meters.items():
             try:
                 response = self.client.get_pds_consumption(pds_id, payload)
+                readings[pds_id] = _build_meter_data(meter, response)
             except OceaAuthError:
                 raise
             except (OceaApiError, RequestException):
                 _LOGGER.warning("Unable to update one water meter")
-                continue
-            readings[pds_id] = _build_meter_data(meter, response)
         return readings
 
     @staticmethod

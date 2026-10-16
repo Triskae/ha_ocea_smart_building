@@ -64,7 +64,7 @@
   },
   "device": {
     "local": {
-      "name": "Ocea - Local {local_id}"
+      "name": "Ocea - Dwelling {local_id}"
     },
     "meter": {
       "name": "Ocea - Compteur {meter_identity}"

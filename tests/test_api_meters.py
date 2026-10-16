@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
-from custom_components.ocea_smart_building.api import OceaApiClient
+import pytest
+
+from custom_components.ocea_smart_building.api import OceaApiClient, OceaApiError
 
 
 def _client() -> OceaApiClient:
@@ -54,6 +56,24 @@ def test_get_appareils_posts_all_pds_ids() -> None:
     assert call.args[0].endswith("/api/v1/local/appareils")
     assert call.kwargs["json"] == {"pdsIds": ["pds-cold-1", "pds-cold-2"]}
     assert call.kwargs["headers"]["Authorization"] == "Bearer access-token"
+
+
+@pytest.mark.parametrize("method", ["get", "post"])
+def test_api_error_does_not_expose_response_body(method: str) -> None:
+    """API error messages must not leak response data into Home Assistant logs."""
+    client = _client()
+    response = Mock()
+    response.status_code = 500
+    response.text = "private resident data"
+    setattr(client._session, method, Mock(return_value=response))
+
+    with pytest.raises(OceaApiError, match="HTTP 500") as err:
+        if method == "get":
+            client._api_get("/api/v1/test")
+        else:
+            client._api_post("/api/v1/test", {})
+
+    assert "private resident data" not in str(err.value)
 
 
 def test_get_pds_consumption_posts_period_and_granularity() -> None:

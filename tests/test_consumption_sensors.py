@@ -210,6 +210,53 @@ def test_meter_data_builder_keeps_latest_leak_estimate() -> None:
     assert reading.latest_date == "2026-09-15"
 
 
+def test_meter_data_builder_normalizes_string_leak_estimate() -> None:
+    """Test string estimates and comma decimals are exposed as numbers."""
+    meter = OceaMeter.from_api(
+        {"id": "pds-cold-1", "fluide": "EauFroide"},
+        None,
+    )
+
+    reading = _build_meter_data(
+        meter,
+        {
+            "consommations": [
+                {"date": "2026-09-15", "valeur": "0,321", "fuiteEstimee": "0,015"}
+            ],
+        },
+    )
+
+    assert reading.value == 0.321
+    assert reading.estimated_leak == 0.015
+
+
+async def test_coordinator_isolates_malformed_meter_response(
+    hass: HomeAssistant,
+) -> None:
+    """Test malformed meter data does not discard other meter readings or totals."""
+    client = Mock()
+    client.get_consumptions.return_value = [
+        {"fluide": "EauFroide", "valeur": "1,14"},
+    ]
+    client.get_pds.return_value = [
+        {"id": "pds-cold-1", "fluide": "EauFroide"},
+        {"id": "pds-cold-2", "fluide": "EauFroide"},
+    ]
+    client.get_appareils.return_value = []
+    client.get_pds_consumption.side_effect = [
+        {"consommations": [{"date": "2026-09-15", "valeur": 0.321}]},
+        {"consommations": [{"date": "2026-09-15", "valeur": "invalid"}]},
+    ]
+    coordinator = _coordinator(hass, client)
+
+    await coordinator._async_setup()
+    data = await coordinator._async_update_data()
+
+    assert data.totals["eau_froide"] == 1.14
+    assert data.meters["pds-cold-1"].value == 0.321
+    assert data.meters["pds-cold-2"].value is None
+
+
 async def test_coordinator_discovers_meters_only_once(
     hass: HomeAssistant,
 ) -> None:
