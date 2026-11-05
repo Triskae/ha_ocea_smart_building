@@ -51,7 +51,23 @@
       },
       "cetc": {
         "name": "Thermal heating"
+      },
+      "fuite": {
+        "name": "Estimated leak"
       }
+    },
+    "binary_sensor": {
+      "fuite": {
+        "name": "Leak detected"
+      }
+    }
+  },
+  "device": {
+    "local": {
+      "name": "Ocea - Dwelling {local_id}"
+    },
+    "meter": {
+      "name": "Ocea - Meter {meter_identity}"
     }
   }
 }

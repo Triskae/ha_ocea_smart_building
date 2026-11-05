@@ -1,7 +1,7 @@
 """Constants for the Ocea Smart Building integration."""
 
 DOMAIN = "ocea_smart_building"
-INTEGRATION_VERSION = "1.1.0"
+INTEGRATION_VERSION = "1.2.0"
 
 # Azure AD B2C
 B2C_TENANT = "osbespaceresident"
@@ -35,3 +35,9 @@ PASSWORD_NOT_CHANGED = "__**password_not_changed**__"
 
 # Defaults
 DEFAULT_SCAN_INTERVAL = 18000  # 5 hours
+
+# Maps an Ocea fluid code to its dwelling-level sensor key.
+WATER_FLUID_SENSOR_KEYS: dict[str, str] = {
+    "EauFroide": "eau_froide",
+    "EauChaude": "eau_chaude",
+}
