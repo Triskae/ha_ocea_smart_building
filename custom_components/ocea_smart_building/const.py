@@ -41,3 +41,6 @@ WATER_FLUID_SENSOR_KEYS: dict[str, str] = {
     "EauFroide": "eau_froide",
     "EauChaude": "eau_chaude",
 }
+
+# Scan interval choices offered in the options flow, in hours
+SCAN_INTERVAL_CHOICES_HOURS = (1, 2, 5, 12, 24)

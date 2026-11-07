@@ -41,6 +41,28 @@
       "reconfigure_successful": "Reconfiguration was successful"
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Ocea Smart Building options",
+        "description": "Choose how often Ocea data is refreshed.",
+        "data": {
+          "scan_interval": "Refresh interval"
+        }
+      }
+    }
+  },
+  "selector": {
+    "scan_interval_hours": {
+      "options": {
+        "1": "1 hour",
+        "2": "2 hours",
+        "5": "5 hours",
+        "12": "12 hours",
+        "24": "24 hours"
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "eau_froide": {
