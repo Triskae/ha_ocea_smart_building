@@ -1,4 +1,4 @@
-"""Sensor platform for Ocea Smart Building water consumption."""
+"""Sensor platform for OCEA Smart Building water consumption."""
 
 from __future__ import annotations
 
@@ -13,13 +13,13 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import CONF_LOCAL_ID, PDS_FLUID_METADATA
-from .coordinator import OceaConfigEntry, OceaDataUpdateCoordinator
+from .coordinator import OCEAConfigEntry, OCEADataUpdateCoordinator
 from .entity import (
-    OceaEntity,
+    OCEAEntity,
     meter_device_info,
     meter_entity_unique_id,
 )
-from .ocea import OceaMeter
+from .ocea import OCEAMeter
 
 PARALLEL_UPDATES = 0
 
@@ -39,15 +39,15 @@ SENSOR_TYPES: tuple[SensorEntityDescription, ...] = (
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: OceaConfigEntry,
+    config_entry: OCEAConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Ocea Smart Building sensors from a config entry."""
+    """Set up OCEA Smart Building sensors from a config entry."""
     coordinator = config_entry.runtime_data
     local_id = config_entry.data[CONF_LOCAL_ID]
     descriptions = {description.key: description for description in SENSOR_TYPES}
 
-    entities: list[OceaMeterSensor] = []
+    entities: list[OCEAMeterSensor] = []
     if coordinator.data:
         for meter in coordinator.data.meters.values():
             if (
@@ -55,7 +55,7 @@ async def async_setup_entry(
                 and meter.estimated_leak is not None
             ):
                 entities.append(
-                    OceaMeterSensor(
+                    OCEAMeterSensor(
                         coordinator=coordinator,
                         description=descriptions["fuite"],
                         local_id=local_id,
@@ -74,8 +74,8 @@ async def async_setup_entry(
 
     @callback
     def _async_add_new_leak_entities() -> None:
-        """Add leak entities when Ocea starts reporting an estimate."""
-        new_entities: list[OceaMeterSensor] = []
+        """Add leak entities when OCEA starts reporting an estimate."""
+        new_entities: list[OCEAMeterSensor] = []
         if coordinator.data is None:
             return
         for reading in coordinator.data.meters.values():
@@ -91,7 +91,7 @@ async def async_setup_entry(
                 continue
             leak_entity_keys.add(meter.identifier)
             new_entities.append(
-                OceaMeterSensor(
+                OCEAMeterSensor(
                     coordinator=coordinator,
                     description=descriptions["fuite"],
                     local_id=local_id,
@@ -106,17 +106,17 @@ async def async_setup_entry(
     )
 
 
-class OceaMeterSensor(OceaEntity, SensorEntity):
+class OCEAMeterSensor(OCEAEntity, SensorEntity):
     """Representation of an estimated leak for one water meter."""
 
     entity_description: SensorEntityDescription
 
     def __init__(
         self,
-        coordinator: OceaDataUpdateCoordinator,
+        coordinator: OCEADataUpdateCoordinator,
         description: SensorEntityDescription,
         local_id: str,
-        meter: OceaMeter,
+        meter: OCEAMeter,
     ) -> None:
         """Initialize an individual meter sensor."""
         super().__init__(coordinator)

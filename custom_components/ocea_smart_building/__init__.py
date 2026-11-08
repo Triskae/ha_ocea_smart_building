@@ -1,4 +1,4 @@
-"""The Ocea Smart Building integration."""
+"""The OCEA Smart Building integration."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
 from .const import CONF_LOCAL_ID, DOMAIN, UA
-from .coordinator import OceaConfigEntry, OceaDataUpdateCoordinator
-from .history import OceaHistoryManager, history_store
-from .ocea import OceaApiClient
+from .coordinator import OCEAConfigEntry, OCEADataUpdateCoordinator
+from .history import OCEAHistoryManager, history_store
+from .ocea import OCEAApiClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,12 +26,12 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
     local_id = entry.data.get(CONF_LOCAL_ID)
     if not isinstance(local_id, str) or not local_id.strip():
-        _LOGGER.error("Cannot migrate Ocea entry: dwelling identifier is missing")
+        _LOGGER.error("Cannot migrate OCEA entry: dwelling identifier is missing")
         return False
     existing = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, local_id)
     if existing is not None and existing.entry_id != entry.entry_id:
         _LOGGER.error(
-            "Cannot migrate Ocea entry: another entry already uses this dwelling; "
+            "Cannot migrate OCEA entry: another entry already uses this dwelling; "
             "remove the duplicate entry after reviewing its configuration"
         )
         return False
@@ -39,27 +39,27 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: OceaConfigEntry) -> bool:
-    """Set up Ocea Smart Building from a config entry."""
+async def async_setup_entry(hass: HomeAssistant, entry: OCEAConfigEntry) -> bool:
+    """Set up OCEA Smart Building from a config entry."""
     session = async_create_clientsession(
         hass,
         auto_cleanup=False,
         connector_owner=False,
         cookie_jar=CookieJar(quote_cookie=False),
     )
-    client = OceaApiClient(
+    client = OCEAApiClient(
         email=entry.data[CONF_EMAIL],
         password=entry.data[CONF_PASSWORD],
         user_agent=UA,
         session=session,
     )
 
-    coordinator = OceaDataUpdateCoordinator(hass, client, entry)
+    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
     try:
         await coordinator.async_config_entry_first_refresh()
         entry.runtime_data = coordinator
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-        history = OceaHistoryManager(hass, entry, client, coordinator)
+        history = OCEAHistoryManager(hass, entry, client, coordinator)
         history.async_start()
     except BaseException:
         session.detach()
@@ -68,7 +68,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: OceaConfigEntry) -> bool
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: OceaConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: OCEAConfigEntry) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 

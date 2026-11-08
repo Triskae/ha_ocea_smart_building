@@ -1,11 +1,11 @@
-"""Errors raised by the Ocea API client."""
+"""Errors raised by the OCEA API client."""
 
 
-class OceaAuthError(Exception):
+class OCEAAuthError(Exception):
     """Authentication error."""
 
 
-class OceaApiError(Exception):
+class OCEAApiError(Exception):
     """API communication error."""
 
     def __init__(self, message: str, *, status: int | None = None) -> None:

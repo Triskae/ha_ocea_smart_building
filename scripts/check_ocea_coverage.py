@@ -1,4 +1,4 @@
-"""Verify that each Ocea client module has strictly more than 95% coverage."""
+"""Verify that each OCEA client module has strictly more than 95% coverage."""
 
 from __future__ import annotations
 

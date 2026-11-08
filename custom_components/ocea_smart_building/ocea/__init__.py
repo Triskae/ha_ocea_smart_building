@@ -1,26 +1,26 @@
-"""Ocea resident API client and data models."""
+"""OCEA resident API client and data models."""
 
-from .client import OceaApiClient
-from .exceptions import OceaApiError, OceaAuthError
+from .client import OCEAApiClient
+from .exceptions import OCEAApiError, OCEAAuthError
 from .models import (
     OccupationStatus,
-    OceaAddress,
-    OceaDwelling,
-    OceaDwellingDetails,
-    OceaMeter,
-    OceaPds,
-    OceaResident,
+    OCEAAddress,
+    OCEADwelling,
+    OCEADwellingDetails,
+    OCEAMeter,
+    OCEAPds,
+    OCEAResident,
 )
 
 __all__ = [
+    "OCEAAddress",
+    "OCEAApiClient",
+    "OCEAApiError",
+    "OCEAAuthError",
+    "OCEADwelling",
+    "OCEADwellingDetails",
+    "OCEAMeter",
+    "OCEAPds",
+    "OCEAResident",
     "OccupationStatus",
-    "OceaAddress",
-    "OceaApiClient",
-    "OceaApiError",
-    "OceaAuthError",
-    "OceaDwelling",
-    "OceaDwellingDetails",
-    "OceaMeter",
-    "OceaPds",
-    "OceaResident",
 ]

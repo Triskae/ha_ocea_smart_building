@@ -8,7 +8,7 @@ from homeassistant.components import system_health
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
-from .coordinator import OceaConfigEntry
+from .coordinator import OCEAConfigEntry
 from .ocea.const import API_BASE
 
 SystemHealthValue = int | bool | Awaitable[str | dict[str, str]]
@@ -28,7 +28,7 @@ async def system_health_info(hass: HomeAssistant) -> dict[str, SystemHealthValue
         "can_reach_server": system_health.async_check_can_reach_url(hass, API_BASE),
     }
 
-    entries: list[OceaConfigEntry] = hass.config_entries.async_loaded_entries(DOMAIN)
+    entries: list[OCEAConfigEntry] = hass.config_entries.async_loaded_entries(DOMAIN)
     if entries:
         coordinators = [entry.runtime_data for entry in entries]
         info["last_update_success"] = all(

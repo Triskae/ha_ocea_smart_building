@@ -1,4 +1,4 @@
-"""Tests for the standalone Ocea CLI."""
+"""Tests for the standalone OCEA CLI."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def mock_cli_session(monkeypatch, results, dwelling_results=None):
 
 
 def test_fluid_label_recognizes_exact_cetc_code():
-    """Only the actual Ocea code is recognized as CETC heating."""
+    """Only the actual OCEA code is recognized as CETC heating."""
     assert ocea_cli.fluid_label("Cetc") == "Heating (CETC)"
     assert ocea_cli.fluid_label("CETC") == "Other fluid"
 
@@ -313,7 +313,7 @@ def test_pds_errors_are_reported_and_do_not_stop_other_meters(monkeypatch, capsy
 ])
 def test_invalid_consumption_response_is_explicit(data):
     """Unexpected structures are errors, never silently treated as zero."""
-    with pytest.raises(ocea_cli.OceaCliError, match="Invalid consumption"):
+    with pytest.raises(ocea_cli.OCEACliError, match="Invalid consumption"):
         ocea_cli.display_consumptions(data, date(2026, 2, 1), date(2026, 2, 2), date(2026, 2, 3))
 
 

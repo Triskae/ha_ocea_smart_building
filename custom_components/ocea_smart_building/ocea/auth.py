@@ -1,4 +1,4 @@
-"""Azure AD B2C authentication for the Ocea API."""
+"""Azure AD B2C authentication for the OCEA API."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from .const import (
     B2C_TENANT,
     B2C_TOKEN,
 )
-from .exceptions import OceaAuthError
+from .exceptions import OCEAAuthError
 
 _LOGGER = logging.getLogger(__name__)
 _TIMEOUT = ClientTimeout(total=30)
@@ -37,7 +37,7 @@ def _generate_pkce() -> tuple[str, str]:
     return verifier, challenge
 
 
-class OceaAuthentication:
+class OCEAAuthentication:
     """Own B2C credentials and tokens, but not the injected session."""
 
     def __init__(
@@ -107,10 +107,10 @@ class OceaAuthentication:
             "x-ms-cpim-csrf"
         )
         if not csrf:
-            raise OceaAuthError("No x-ms-cpim-csrf cookie received")
+            raise OCEAAuthError("No x-ms-cpim-csrf cookie received")
         trans_match = re.search(r'"transId"\s*:\s*"([^"]+)"', html)
         if not trans_match:
-            raise OceaAuthError("Could not extract transId from login page")
+            raise OCEAAuthError("Could not extract transId from login page")
         trans_id = trans_match.group(1)
 
         _LOGGER.debug("Auth step 2/4: posting credentials")
@@ -142,14 +142,14 @@ class OceaAuthentication:
             timeout=_TIMEOUT,
         ) as response:
             if response.status != 200:
-                raise OceaAuthError(f"Login failed: HTTP {response.status}")
+                raise OCEAAuthError(f"Login failed: HTTP {response.status}")
             text = await response.text()
         try:
             result = json.loads(text) if text.strip() else {}
         except ValueError:
             result = {}
         if isinstance(result, dict) and result.get("status") and str(result["status"]) != "200":
-            raise OceaAuthError("Login rejected: Invalid credentials")
+            raise OCEAAuthError("Login rejected: Invalid credentials")
 
         _LOGGER.debug("Auth step 3/4: fetching authorization code")
         confirmed_url = URL(
@@ -167,17 +167,17 @@ class OceaAuthentication:
         ) as response:
             location = response.headers.get("Location", "")
         if not location:
-            raise OceaAuthError("No redirect after login confirmation")
+            raise OCEAAuthError("No redirect after login confirmation")
         code = None
         if "#" in location:
             fragment = parse_qs(location.split("#", 1)[1])
             code = fragment.get("code", [None])[0]
             if fragment.get("error"):
-                raise OceaAuthError("B2C authorization failed")
+                raise OCEAAuthError("B2C authorization failed")
         if not code:
             code = parse_qs(urlparse(location).query).get("code", [None])[0]
         if not code:
-            raise OceaAuthError("No authorization code in redirect")
+            raise OCEAAuthError("No authorization code in redirect")
 
         _LOGGER.debug("Auth step 4/4: exchanging code for tokens")
         async with self._session.post(
@@ -195,10 +195,10 @@ class OceaAuthentication:
             timeout=_TIMEOUT,
         ) as response:
             if response.status != 200:
-                raise OceaAuthError(f"Token exchange failed: HTTP {response.status}")
+                raise OCEAAuthError(f"Token exchange failed: HTTP {response.status}")
             tokens: object = await response.json(content_type=None)
         self._store_tokens(tokens, refresh=False)
-        _LOGGER.info("Ocea authentication successful")
+        _LOGGER.info("OCEA authentication successful")
 
     async def refresh_access_token(self, expected_token: str | None = None) -> None:
         """Refresh the access token or perform full authentication."""
@@ -237,11 +237,11 @@ class OceaAuthentication:
     def _store_tokens(self, tokens: object, *, refresh: bool) -> None:
         """Validate and retain tokens without exposing response data."""
         if not isinstance(tokens, dict):
-            raise OceaAuthError("Invalid token response")
+            raise OCEAAuthError("Invalid token response")
         access = tokens.get("access_token")
         if not isinstance(access, str) or not access:
             message = "No access token on refresh" if refresh else "No access token received"
-            raise OceaAuthError(message)
+            raise OCEAAuthError(message)
         refresh_token = tokens.get("refresh_token")
         self._access_token = access
         if isinstance(refresh_token, str) and refresh_token:

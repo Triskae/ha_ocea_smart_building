@@ -1,4 +1,4 @@
-"""Asynchronous client for the Ocea resident API."""
+"""Asynchronous client for the OCEA resident API."""
 
 from __future__ import annotations
 
@@ -14,19 +14,19 @@ from urllib.parse import quote
 
 from aiohttp import ClientSession, ClientTimeout
 
-from .auth import OceaAuthentication
+from .auth import OCEAAuthentication
 from .const import API_BASE, B2C_REDIRECT_URI
-from .exceptions import OceaApiError
+from .exceptions import OCEAApiError
 from .models import (
-    OceaConsumptionRequest,
-    OceaConsumptionSeries,
-    OceaDashboardData,
-    OceaDeviceData,
-    OceaDevicesRequest,
-    OceaDwellingDetails,
-    OceaDwellingFluids,
-    OceaPdsData,
-    OceaResident,
+    OCEAConsumptionRequest,
+    OCEAConsumptionSeries,
+    OCEADashboardData,
+    OCEADeviceData,
+    OCEADevicesRequest,
+    OCEADwellingDetails,
+    OCEADwellingFluids,
+    OCEAPdsData,
+    OCEAResident,
     is_consumption_response,
     is_dashboard_consumption,
     is_device_response,
@@ -53,7 +53,7 @@ _SAFE_VALUES = {
 }
 
 
-class OceaApiClient:
+class OCEAApiClient:
     """Client for the resident API using an externally owned session."""
 
     def __init__(
@@ -67,7 +67,7 @@ class OceaApiClient:
         """Initialize the API client without taking ownership of the session."""
         self._user_agent = user_agent
         self._session = session
-        self._auth = OceaAuthentication(session, email, password, user_agent)
+        self._auth = OCEAAuthentication(session, email, password, user_agent)
         self._diagnostic_key = secrets.token_bytes(16)
 
     async def _api_request(
@@ -83,7 +83,7 @@ class OceaApiClient:
             await self._auth.authenticate()
         access_token = self._auth.access_token
         if access_token is None:
-            raise OceaApiError("Authentication completed without an access token")
+            raise OCEAApiError("Authentication completed without an access token")
         for attempt in range(2):
             headers = {
                 "Authorization": f"Bearer {access_token}",
@@ -106,7 +106,7 @@ class OceaApiClient:
                     try:
                         result: object = await response.json(content_type=None)
                     except (JSONDecodeError, UnicodeDecodeError) as err:
-                        raise OceaApiError("Invalid API JSON response") from err
+                        raise OCEAApiError("Invalid API JSON response") from err
                     if diagnostic is not None and _LOGGER.isEnabledFor(logging.DEBUG):
                         self._log_response(diagnostic, result)
                     return result
@@ -115,24 +115,24 @@ class OceaApiClient:
                 await self._auth.refresh_access_token(access_token)
                 access_token = self._auth.access_token
                 if access_token is None:
-                    raise OceaApiError("Token refresh completed without an access token")
+                    raise OCEAApiError("Token refresh completed without an access token")
                 continue
-            raise OceaApiError(f"API error: HTTP {status}", status=status)
-        raise OceaApiError("API authentication retry exhausted")
+            raise OCEAApiError(f"API error: HTTP {status}", status=status)
+        raise OCEAApiError("API authentication retry exhausted")
 
-    async def get_resident(self) -> OceaResident:
+    async def get_resident(self) -> OCEAResident:
         """Get and validate resident information and occupations."""
         result = await self._api_request("GET", "/api/v1/resident", diagnostic="resident")
-        return OceaResident.from_api(_object_response(result))
+        return OCEAResident.from_api(_object_response(result))
 
-    async def get_consumptions(self, local_id: str) -> list[OceaDashboardData]:
+    async def get_consumptions(self, local_id: str) -> list[OCEADashboardData]:
         """Get dwelling consumption data."""
         result = await self._api_request(
             "GET", f"/api/v1/local/{quote(local_id, safe='')}/dashboard/consos",
             diagnostic="dashboard",
         )
         return [
-            OceaDashboardData.from_api(_validated_response(item, is_dashboard_consumption))
+            OCEADashboardData.from_api(_validated_response(item, is_dashboard_consumption))
             for item in _list_response(result)
         ]
 
@@ -145,11 +145,11 @@ class OceaApiClient:
             )
         )
 
-    async def get_dwelling_details(self, local_id: str) -> OceaDwellingDetails:
+    async def get_dwelling_details(self, local_id: str) -> OCEADwellingDetails:
         """Get and validate the details of an accessible dwelling."""
         path_id = quote(local_id, safe="")
         result = await self._api_request("GET", f"/api/v1/local/{path_id}", diagnostic="dwelling")
-        return OceaDwellingDetails.from_api(_object_response(result))
+        return OCEADwellingDetails.from_api(_object_response(result))
 
     async def get_dwelling_fluids(self, local_id: str) -> list[str]:
         """Get the fluids advertised for a dwelling."""
@@ -158,31 +158,31 @@ class OceaApiClient:
                 "GET", f"/api/v1/local/{quote(local_id, safe='')}", diagnostic="dwelling"
             )
         )
-        return list(OceaDwellingFluids.from_api(result).fluids)
+        return list(OCEADwellingFluids.from_api(result).fluids)
 
-    async def get_pds(self, local_id: str) -> list[OceaPdsData]:
+    async def get_pds(self, local_id: str) -> list[OCEAPdsData]:
         """Get a dwelling's points of measurement."""
         result = await self._api_request(
             "GET", f"/api/v1/local/{quote(local_id, safe='')}/pds", diagnostic="pds"
         )
         return [
-            OceaPdsData.from_api(_validated_response(item, is_pds_response))
+            OCEAPdsData.from_api(_validated_response(item, is_pds_response))
             for item in _list_response(result)
         ]
 
-    async def get_appareils(self, payload: OceaDevicesRequest) -> list[OceaDeviceData]:
+    async def get_appareils(self, payload: OCEADevicesRequest) -> list[OCEADeviceData]:
         """Get the devices associated with the given points of measurement."""
         result = await self._api_request(
             "POST", "/api/v1/local/appareils", payload, diagnostic="devices"
         )
         return [
-            OceaDeviceData.from_api(_validated_response(item, is_device_response))
+            OCEADeviceData.from_api(_validated_response(item, is_device_response))
             for item in _list_response(result)
         ]
 
     async def get_pds_consumption(
-        self, local_id: str, pds_id: str, payload: OceaConsumptionRequest
-    ) -> OceaConsumptionSeries:
+        self, local_id: str, pds_id: str, payload: OCEAConsumptionRequest
+    ) -> OCEAConsumptionSeries:
         """Get consumption data for one point of measurement."""
         result = _object_response(
             await self._api_request(
@@ -192,11 +192,11 @@ class OceaApiClient:
                 diagnostic="consumption",
             )
         )
-        return OceaConsumptionSeries.from_api(_validated_response(result, is_consumption_response))
+        return OCEAConsumptionSeries.from_api(_validated_response(result, is_consumption_response))
 
     async def get_dwelling_consumption(
-        self, local_id: str, fluid: str, payload: OceaConsumptionRequest
-    ) -> OceaConsumptionSeries:
+        self, local_id: str, fluid: str, payload: OCEAConsumptionRequest
+    ) -> OCEAConsumptionSeries:
         """Get consumption data for a dwelling and fluid."""
         result = _object_response(
             await self._api_request(
@@ -206,7 +206,7 @@ class OceaApiClient:
                 diagnostic="consumption",
             )
         )
-        return OceaConsumptionSeries.from_api(_validated_response(result, is_consumption_response))
+        return OCEAConsumptionSeries.from_api(_validated_response(result, is_consumption_response))
 
     async def validate_credentials(self) -> None:
         """Validate credentials through B2C without requesting resident data."""
@@ -240,7 +240,7 @@ class OceaApiClient:
             elif isinstance(value, list):
                 details.append(f"{path}.length:{len(value)}")
                 pending.extend((f"{path}[]", item, depth + 1, "") for item in value[:3])
-        _LOGGER.debug("Ocea API %s shape: %s", endpoint, ", ".join(details[:40]))
+        _LOGGER.debug("OCEA API %s shape: %s", endpoint, ", ".join(details[:40]))
 
 
 def _format_category(field: str, value: object) -> str:
@@ -265,14 +265,14 @@ def _format_category(field: str, value: object) -> str:
 def _object_response(response: object) -> dict[str, object]:
     """Validate the outer shape of an API object response."""
     if not isinstance(response, dict) or not all(isinstance(key, str) for key in response):
-        raise OceaApiError("Invalid API object response")
+        raise OCEAApiError("Invalid API object response")
     return cast(dict[str, object], response)
 
 
 def _list_response(response: object) -> list[dict[str, object]]:
     """Validate the outer shape of a list of API objects."""
     if not isinstance(response, list):
-        raise OceaApiError("Invalid API list response")
+        raise OCEAApiError("Invalid API list response")
     return [_object_response(item) for item in response]
 
 
@@ -282,5 +282,5 @@ def _validated_response(
 ) -> _ResponseT:
     """Return only responses whose known fields have been validated."""
     if not validate(response):
-        raise OceaApiError("Invalid API response")
+        raise OCEAApiError("Invalid API response")
     return response

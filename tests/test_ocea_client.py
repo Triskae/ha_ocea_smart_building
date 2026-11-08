@@ -1,4 +1,4 @@
-"""Tests for Ocea authentication and HTTP contracts using a local server."""
+"""Tests for OCEA authentication and HTTP contracts using a local server."""
 
 from __future__ import annotations
 
@@ -13,19 +13,19 @@ from aiohttp import web
 
 from custom_components.ocea_smart_building.const import UA
 from custom_components.ocea_smart_building.ocea import (
-    OceaAddress,
-    OceaApiClient,
-    OceaApiError,
-    OceaAuthError,
-    OceaDwellingDetails,
-    OceaResident,
+    OCEAAddress,
+    OCEAApiClient,
+    OCEAApiError,
+    OCEAAuthError,
+    OCEADwellingDetails,
+    OCEAResident,
 )
 
 pytestmark = pytest.mark.usefixtures("local_http_only")
 
 
 async def _server(aiohttp_server, monkeypatch, state):
-    """Provide an isolated, synthetic B2C and Ocea API endpoint."""
+    """Provide an isolated, synthetic B2C and OCEA API endpoint."""
     async def authorize(request):
         state["authorize"] = dict(request.query)
         response = web.Response(text=state.get("html", '{"transId":"StateProperties=abc=="}'))
@@ -95,7 +95,7 @@ async def _server(aiohttp_server, monkeypatch, state):
 
 
 def _client(session):
-    return OceaApiClient(
+    return OCEAApiClient(
         "resident@example.com", "placeholder-password",
         user_agent=UA, session=session,
     )
@@ -110,7 +110,7 @@ async def test_validate_credentials_preserves_b2c_flow(aiohttp_server, monkeypat
         client = _client(session)
         assert await client.validate_credentials() is None
         assert state.get("requests", []) == []
-        assert await client.get_resident() == OceaResident(name="", dwellings=())
+        assert await client.get_resident() == OCEAResident(name="", dwellings=())
         assert not session.closed
 
     assert state["login_path"].endswith("?tx=StateProperties=abc==&p=B2C_1A_SIGNUP_SIGNIN")
@@ -152,7 +152,7 @@ async def test_second_unauthorized_response_does_not_retry(aiohttp_server, monke
         client = _client(session)
         client._auth._access_token = "old-placeholder"
         client._auth._refresh_token = "refresh-placeholder"
-        with pytest.raises(OceaApiError, match="HTTP 401"):
+        with pytest.raises(OCEAApiError, match="HTTP 401"):
             await client._api_request(method, "/api/test", {} if method == "POST" else None)
     assert len(state["requests"]) == 2
     assert len(state["token_forms"]) == 1
@@ -217,7 +217,7 @@ async def test_concurrent_initial_requests_share_authentication(
 async def test_authentication_errors(aiohttp_server, monkeypatch, state, error):
     await _server(aiohttp_server, monkeypatch, state)
     async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as session:
-        with pytest.raises(OceaAuthError, match=error):
+        with pytest.raises(OCEAAuthError, match=error):
             await _client(session).validate_credentials()
 
 
@@ -255,7 +255,7 @@ async def test_refresh_without_access_token_fails(aiohttp_server, monkeypatch):
     async with aiohttp.ClientSession() as session:
         client = _client(session)
         client._auth._refresh_token = "refresh-placeholder"
-        with pytest.raises(OceaAuthError, match="No access token on refresh"):
+        with pytest.raises(OCEAAuthError, match="No access token on refresh"):
             await client._auth.refresh_access_token()
 
 
@@ -347,7 +347,7 @@ async def test_invalid_dwelling_fluids(aiohttp_server, monkeypatch, response):
     async with aiohttp.ClientSession() as session:
         client = _client(session)
         client._auth._access_token = "token-placeholder"
-        with pytest.raises(OceaApiError, match="Invalid dwelling fluid"):
+        with pytest.raises(OCEAApiError, match="Invalid dwelling fluid"):
             await client.get_dwelling_fluids("local")
 
 
@@ -365,8 +365,8 @@ async def test_dwelling_access_and_details(aiohttp_server, monkeypatch):
             "codePostal": "12345",
             "pays": "Country",
         }}}
-        assert await client.get_dwelling_details("other-local") == OceaDwellingDetails(
-            address=OceaAddress(
+        assert await client.get_dwelling_details("other-local") == OCEADwellingDetails(
+            address=OCEAAddress(
                 street_number="9",
                 complement="Unit B",
                 postal_code="12345",
@@ -390,7 +390,7 @@ async def test_invalid_dwelling_details_response(aiohttp_server, monkeypatch, re
     async with aiohttp.ClientSession() as session:
         client = _client(session)
         client._auth._access_token = "token-placeholder"
-        with pytest.raises(OceaApiError):
+        with pytest.raises(OCEAApiError):
             await client.get_dwelling_details("other-local")
 
 
@@ -401,7 +401,7 @@ async def test_api_error_exposes_http_status(aiohttp_server, monkeypatch, status
     async with aiohttp.ClientSession() as session:
         client = _client(session)
         client._auth._access_token = "token-placeholder"
-        with pytest.raises(OceaApiError) as error:
+        with pytest.raises(OCEAApiError) as error:
             await client.check_dwelling_access("other-local")
     assert error.value.status == status
 
@@ -410,7 +410,7 @@ async def test_first_api_call_authenticates_when_token_is_missing(aiohttp_server
     state = {}
     await _server(aiohttp_server, monkeypatch, state)
     async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as session:
-        assert await _client(session).get_resident() == OceaResident(name="", dwellings=())
+        assert await _client(session).get_resident() == OCEAResident(name="", dwellings=())
     assert state["requests"][0][2] == "Bearer token-placeholder"
 
 
@@ -434,7 +434,7 @@ async def test_get_resident_rejects_invalid_occupation(aiohttp_server, monkeypat
     async with aiohttp.ClientSession() as session:
         client = _client(session)
         client._auth._access_token = "token-placeholder"
-        with pytest.raises(OceaApiError, match="Invalid dwelling identifier"):
+        with pytest.raises(OCEAApiError, match="Invalid dwelling identifier"):
             await client.get_resident()
 
 
@@ -455,7 +455,7 @@ async def test_invalid_resident_response(aiohttp_server, monkeypatch, response):
     async with aiohttp.ClientSession() as session:
         client = _client(session)
         client._auth._access_token = "token-placeholder"
-        with pytest.raises(OceaApiError, match="Invalid API object"):
+        with pytest.raises(OCEAApiError, match="Invalid API object"):
             await client.get_resident()
 
 
@@ -465,7 +465,7 @@ async def test_invalid_list_response(aiohttp_server, monkeypatch):
     async with aiohttp.ClientSession() as session:
         client = _client(session)
         client._auth._access_token = "token-placeholder"
-        with pytest.raises(OceaApiError, match="Invalid API list"):
+        with pytest.raises(OCEAApiError, match="Invalid API list"):
             await client.get_pds("local-123")
 
 

@@ -1,4 +1,4 @@
-"""Config flow for Ocea Smart Building integration."""
+"""Config flow for OCEA Smart Building integration."""
 
 from __future__ import annotations
 
@@ -23,17 +23,17 @@ from homeassistant.helpers.translation import async_get_translations
 
 from .const import CONF_LOCAL_ID, DOMAIN, PASSWORD_NOT_CHANGED, UA
 from .ocea import (
-    OceaAddress,
-    OceaApiClient,
-    OceaApiError,
-    OceaAuthError,
-    OceaDwelling,
+    OCEAAddress,
+    OCEAApiClient,
+    OCEAApiError,
+    OCEAAuthError,
+    OCEADwelling,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def _format_address(address: OceaAddress | None) -> str | None:
+def _format_address(address: OCEAAddress | None) -> str | None:
     """Format the available address fields for the dwelling selector."""
     if address is None:
         return None
@@ -47,8 +47,8 @@ def _format_address(address: OceaAddress | None) -> str | None:
     return ", ".join(part.strip() for part in parts if part and part.strip()) or None
 
 
-class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Ocea Smart Building."""
+class OCEASmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for OCEA Smart Building."""
 
     VERSION = 2
 
@@ -57,14 +57,14 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
     _dwelling_options: list[SelectOptionDict]
 
     async def _accessible_dwellings(
-        self, client: OceaApiClient, dwellings: tuple[OceaDwelling, ...]
-    ) -> list[OceaDwelling]:
+        self, client: OCEAApiClient, dwellings: tuple[OCEADwelling, ...]
+    ) -> list[OCEADwelling]:
         """Check each distinct dwelling without masking other API failures."""
         accessible = []
         for dwelling in dwellings:
             try:
                 await client.check_dwelling_access(dwelling.local_id)
-            except OceaApiError as err:
+            except OCEAApiError as err:
                 if err.status != 403:
                     raise
             else:
@@ -82,7 +82,7 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
         self._pending_name = ""
         self._dwelling_options = []
         return self.async_create_entry(
-            title=f"Ocea - {name}" if name else f"Ocea - {local_id}",
+            title=f"OCEA - {name}" if name else f"OCEA - {local_id}",
             data={**data, CONF_LOCAL_ID: local_id},
         )
 
@@ -99,7 +99,7 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                 connector_owner=False,
                 cookie_jar=CookieJar(quote_cookie=False),
             )
-            client = OceaApiClient(
+            client = OCEAApiClient(
                 email=user_input[CONF_EMAIL],
                 user_agent=UA,
                 session=session,
@@ -116,14 +116,14 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                     if not dwellings:
                         errors["base"] = "no_dwelling_access"
                     else:
-                        options: list[tuple[OceaDwelling, str | None]] = []
+                        options: list[tuple[OCEADwelling, str | None]] = []
                         for dwelling in dwellings:
                             if len(dwellings) == 1:
                                 options.append((dwelling, None))
                                 continue
                             try:
                                 details = await client.get_dwelling_details(dwelling.local_id)
-                            except OceaApiError as err:
+                            except OCEAApiError as err:
                                 if err.status != 403:
                                     raise
                             else:
@@ -146,9 +146,9 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                                 )
                                 for index, (dwelling, address) in enumerate(options, 1)
                             ]
-            except OceaAuthError:
+            except OCEAAuthError:
                 errors["base"] = "invalid_auth"
-            except OceaApiError as err:
+            except OCEAApiError as err:
                 errors["base"] = "invalid_auth" if err.status == 401 else "cannot_connect"
             except (ClientError, TimeoutError):
                 errors["base"] = "cannot_connect"
@@ -221,7 +221,7 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                 connector_owner=False,
                 cookie_jar=CookieJar(quote_cookie=False),
             )
-            client = OceaApiClient(
+            client = OCEAApiClient(
                 email=user_input[CONF_EMAIL],
                 user_agent=UA,
                 session=session,
@@ -244,9 +244,9 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                     ),
                 ):
                     errors["base"] = "no_dwelling_access"
-            except OceaAuthError:
+            except OCEAAuthError:
                 errors["base"] = "invalid_auth"
-            except OceaApiError as err:
+            except OCEAApiError as err:
                 errors["base"] = "invalid_auth" if err.status == 401 else "cannot_connect"
             except (ClientError, TimeoutError):
                 errors["base"] = "cannot_connect"
@@ -262,7 +262,7 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                 local_id = reauth_entry.data[CONF_LOCAL_ID]
                 return self.async_update_reload_and_abort(
                     reauth_entry,
-                    title=f"Ocea - {resident.name}" if resident.name else f"Ocea - {local_id}",
+                    title=f"OCEA - {resident.name}" if resident.name else f"OCEA - {local_id}",
                     data_updates={
                         CONF_EMAIL: user_input[CONF_EMAIL],
                         CONF_PASSWORD: user_input[CONF_PASSWORD],
@@ -305,7 +305,7 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                 connector_owner=False,
                 cookie_jar=CookieJar(quote_cookie=False),
             )
-            client = OceaApiClient(
+            client = OCEAApiClient(
                 email=email,
                 user_agent=UA,
                 session=session,
@@ -326,9 +326,9 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                     ),
                 ):
                     errors["base"] = "no_dwelling_access"
-            except OceaAuthError:
+            except OCEAAuthError:
                 errors["base"] = "invalid_auth"
-            except OceaApiError as err:
+            except OCEAApiError as err:
                 errors["base"] = "invalid_auth" if err.status == 401 else "cannot_connect"
             except (ClientError, TimeoutError):
                 errors["base"] = "cannot_connect"
@@ -340,7 +340,7 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                 if not errors:
                     local_id = reconfigure_entry.data[CONF_LOCAL_ID]
                     name = resident.name
-                    title = f"Ocea - {name}" if name else f"Ocea - {local_id}"
+                    title = f"OCEA - {name}" if name else f"OCEA - {local_id}"
                     return self.async_update_reload_and_abort(
                         reconfigure_entry,
                         title=title,

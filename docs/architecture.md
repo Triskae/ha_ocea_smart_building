@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the responsibilities and boundaries of the Ocea Smart
+This document describes the responsibilities and boundaries of the OCEA Smart
 Building integration for contributors and coding agents. User-facing setup and
 sensor behavior is documented in the root [README](../README.md); repository
 workflow and privacy requirements are in [AGENTS.md](../AGENTS.md).
@@ -9,12 +9,12 @@ workflow and privacy requirements are in [AGENTS.md](../AGENTS.md).
 
 ```mermaid
 C4Context
-  title System Context - Ocea Smart Building for Home Assistant
+  title System Context - OCEA Smart Building for Home Assistant
 
   Person(user, "Home Assistant user", "Configures the integration and monitors consumption")
-  System(homeAssistant, "Home Assistant", "Home automation platform hosting the Ocea Smart Building custom integration")
-  System_Ext(b2c, "Azure AD B2C", "Authenticates Ocea resident accounts")
-  System_Ext(oceaApi, "Ocea resident API", "Provides dwelling and meter consumption data")
+  System(homeAssistant, "Home Assistant", "Home automation platform hosting the OCEA Smart Building custom integration")
+  System_Ext(b2c, "Azure AD B2C", "Authenticates OCEA resident accounts")
+  System_Ext(oceaApi, "OCEA resident API", "Provides dwelling and meter consumption data")
 
   Rel(user, homeAssistant, "Configures and monitors")
   Rel(homeAssistant, b2c, "Authenticates resident accounts through", "HTTPS")
@@ -29,7 +29,7 @@ manual testing tool, not part of the integration's runtime.
 
 ```mermaid
 C4Container
-  title Container Diagram - Ocea Smart Building
+  title Container Diagram - OCEA Smart Building
 
   Person(user, "Home Assistant user", "Configures the integration and monitors entities")
 
@@ -38,7 +38,7 @@ C4Container
   }
 
   System_Ext(b2c, "Azure AD B2C", "Resident authentication and token service")
-  System_Ext(oceaApi, "Ocea resident API", "Dwelling and meter data")
+  System_Ext(oceaApi, "OCEA resident API", "Dwelling and meter data")
 
   Rel(user, core, "Configures and monitors")
   Rel(core, b2c, "Authenticates and refreshes tokens", "HTTPS")
@@ -53,21 +53,21 @@ in memory; it does not persist them.
 
 ```mermaid
 C4Component
-  title Component Diagram - Ocea Smart Building Integration
+  title Component Diagram - OCEA Smart Building Integration
 
-  Container_Boundary(integration, "Ocea Smart Building custom integration") {
+  Container_Boundary(integration, "OCEA Smart Building custom integration") {
     Component(configFlow, "Config flow", "config_flow.py", "Validates credentials and manages setup, reauthentication, and reconfiguration")
     Component(entrySetup, "Entry lifecycle", "__init__.py", "Creates entry-scoped client resources and loads or unloads platforms")
-    Component(coordinator, "Data update coordinator", "coordinator.py", "Discovers meters, polls Ocea, and normalizes typed readings")
+    Component(coordinator, "Data update coordinator", "coordinator.py", "Discovers meters, polls OCEA, and normalizes typed readings")
     Component(history, "History manager", "history.py", "Backfills dwelling and PDS statistics and updates corrected readings independently of current-data polling")
     Component(entities, "Entity platforms", "sensor.py, binary_sensor.py, entity.py", "Expose water leak estimates and alerts")
-    Component(apiClient, "Ocea API client and models", "ocea/client.py, ocea/models.py", "Makes asynchronous API requests and validates response shapes")
+    Component(apiClient, "OCEA API client and models", "ocea/client.py, ocea/models.py", "Makes asynchronous API requests and validates response shapes")
     Component(authentication, "B2C authentication", "ocea/auth.py", "Performs browser-compatible authorization, PKCE, and token refresh")
   }
 
   System_Ext(homeAssistant, "Home Assistant Core", "Config-entry storage, HTTP session helpers, and entity runtime")
   System_Ext(b2c, "Azure AD B2C", "Resident authentication and token service")
-  System_Ext(oceaApi, "Ocea resident API", "Dwelling and meter data")
+  System_Ext(oceaApi, "OCEA resident API", "Dwelling and meter data")
 
   Rel(configFlow, apiClient, "Validates credentials and fetches resident data")
   Rel(configFlow, homeAssistant, "Creates or updates validated config entries")
@@ -85,7 +85,7 @@ C4Component
 ```
 
 Home Assistant lifecycle and presentation concerns stay in the integration
-modules. The `ocea/` package owns Ocea HTTP requests, response-shape validation,
+modules. The `ocea/` package owns OCEA HTTP requests, response-shape validation,
 authentication, API models, and client exceptions. Resident information and
 dwelling details, including structured addresses, are converted to typed
 models at the client boundary. JSON request and response contracts also live
@@ -156,14 +156,14 @@ readings and separate dwelling water and CETC readings as external statistics.
 Dwelling fluid discovery does not depend on PDS discovery and uses the same
 supported-fluid metadata. The front-end identifies the thermal fluid as `Cetc` and
 maps it to kWh; the client classifies generic, water, RFC and unclassified
-consumption responses while retaining Ocea's wire fields. A meter-specific
+consumption responses while retaining OCEA's wire fields. A meter-specific
 read failure does not discard successful readings from other meters or the
 dwelling totals; missing leak estimates remain unavailable rather than being
 reported as “no leak.”
 
 Current-month requests and historical timestamps use `Europe/Paris` as the
 integration's calendar convention, independent of Home Assistant's configured
-timezone. The actual timezone of Ocea's daily aggregation is not established.
+timezone. The actual timezone of OCEA's daily aggregation is not established.
 Each external statistic ID is derived from the configured dwelling ID, PDS ID and
 exact supported fluid code. It does not depend on the config-entry ID, cache
 generation, history start date, device serial number or timezone. The private
@@ -194,11 +194,11 @@ retry delay; a failed series does not block the others.
 The manager requests history only through the last completed day in its
 `Europe/Paris` calendar.
 Once a series catches up, it checks a three-day overlap daily and revisits older
-periods weekly to find late corrections. When Ocea returns a changed daily
+periods weekly to find late corrections. When OCEA returns a changed daily
 value, the manager recalculates and republishes cumulative sums from the first
 changed day onward. A missing date is not synthesized as zero or interpreted as
 a deletion. The API's maximum supported period remains an empirical limit; 90
-days is the initial request target, not a guarantee about Ocea's server.
+days is the initial request target, not a guarantee about OCEA's server.
 Requests currently encode each inclusive integration-side period with a midnight
 UTC start and a `23:59:59.999Z` end. The observed portal uses midnight UTC for
 both bounds, but the server's end-boundary semantics and data consolidation
@@ -219,11 +219,11 @@ endpoints; dwelling and PDS totals may overlap and must not be added together.
 | `coordinator.py` | Discover PDS/meter metadata at startup; fetch and normalize dwelling totals and per-meter readings; expose a typed coordinator payload and translate API failures to Home Assistant update/auth errors. |
 | `history.py` | Run an entry-scoped backfill and daily history service for dwelling and PDS water and CETC readings, persist per-series progress, and enqueue external Recorder statistics. |
 | `entity.py` | Shared coordinator entity base, device metadata, and stable unique-ID construction for dwelling and meter entities. |
-| `sensor.py` | Estimated-leak sensors for water meters when Ocea provides estimates. |
+| `sensor.py` | Estimated-leak sensors for water meters when OCEA provides estimates. |
 | `binary_sensor.py` | Per-meter leak state, derived from the latest estimated-leak value. Missing estimates are represented as unavailable, not as “no leak.” |
 | `const.py` | Integration domain, version/User-Agent, config keys, polling interval, and fluid-to-sensor mapping. |
 | `strings.json`, `translations/` | Config-flow, entity, and device translations. Keep the source and English/French translations aligned when translated keys change. |
-| `ocea/` | Asynchronous Ocea API client, browser-compatible B2C authentication, API models, protocol constants, and client exceptions. This package uses but does not own the injected HTTP session. |
+| `ocea/` | Asynchronous OCEA API client, browser-compatible B2C authentication, API models, protocol constants, and client exceptions. This package uses but does not own the injected HTTP session. |
 | `ocea_cli.py` | Standalone manual API-testing CLI. It intentionally runs without Home Assistant and uses `requests`; it is not the integration's runtime client. |
 
 Tests live under `tests/`. Config-flow and entry lifecycle behavior is covered
@@ -235,7 +235,7 @@ in `test_config_flow.py` and `test_setup.py`; coordinator and sensor behavior in
 ## Boundaries and invariants
 
 - The integration owns the lifetime of the Home Assistant-created session;
-  `OceaApiClient` and `OceaAuthentication` use it but do not close it. Config
+  `OCEAApiClient` and `OCEAAuthentication` use it but do not close it. Config
   flows use their own isolated sessions so cookies are not shared across
   accounts or flow attempts.
 - Preserve the browser-compatible B2C flow, including cookie handling, PKCE,

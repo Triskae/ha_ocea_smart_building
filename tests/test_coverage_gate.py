@@ -1,4 +1,4 @@
-"""Tests for the per-module Ocea coverage threshold."""
+"""Tests for the per-module OCEA coverage threshold."""
 
 from __future__ import annotations
 

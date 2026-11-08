@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CLI script to authenticate with Ocea Smart Building and explore consumption.
+CLI script to authenticate with OCEA Smart Building and explore consumption.
 
 Usage:
     python3 ocea_cli.py --email your@email.com --password yourpass
@@ -279,7 +279,7 @@ def authenticate(
 
 # ─── API helpers ──────────────────────────────────────────────────────────────
 
-class OceaCliError(Exception):
+class OCEACliError(Exception):
     """An API error safe to display without account details."""
 
 
@@ -307,11 +307,11 @@ def api_request(
     )
     log.debug("API %s returned HTTP %d", method, response.status_code)
     if response.status_code != 200:
-        raise OceaCliError(f"HTTP {response.status_code}")
+        raise OCEACliError(f"HTTP {response.status_code}")
     try:
         return response.json()
     except requests.exceptions.JSONDecodeError:
-        raise OceaCliError("Invalid JSON response") from None
+        raise OCEACliError("Invalid JSON response") from None
 
 
 def fetch_resident(
@@ -322,7 +322,7 @@ def fetch_resident(
     log.debug("Requesting resident occupations")
     result = api_request(session, access_token, "GET", "/api/v1/resident")
     if not isinstance(result, dict):
-        raise OceaCliError("Invalid resident response")
+        raise OCEACliError("Invalid resident response")
     return result
 
 
@@ -337,7 +337,7 @@ def fetch_consumptions(
         f"/api/v1/local/{quote(local_id, safe='')}/dashboard/consos",
     )
     if not isinstance(result, list) or not all(isinstance(item, dict) for item in result):
-        raise OceaCliError("Invalid dashboard response")
+        raise OCEACliError("Invalid dashboard response")
     return result
 
 
@@ -349,7 +349,7 @@ def fetch_dwelling_fluids(
         session, access_token, "GET", f"/api/v1/local/{quote(local_id, safe='')}"
     )
     if not isinstance(result, dict) or not isinstance(result.get("fluidesRestitues"), list):
-        raise OceaCliError("Invalid dwelling fluids response")
+        raise OCEACliError("Invalid dwelling fluids response")
     return result["fluidesRestitues"]
 
 
@@ -377,7 +377,7 @@ def fetch_pds(session: requests.Session, access_token: str, local_id: str) -> li
         session, access_token, "GET", f"/api/v1/local/{quote(local_id, safe='')}/pds"
     )
     if not isinstance(result, list):
-        raise OceaCliError("Invalid PDS response")
+        raise OCEACliError("Invalid PDS response")
     return result
 
 
@@ -422,13 +422,13 @@ def display_number(value: object) -> str:
     if value is None:
         return "unavailable"
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
-        raise OceaCliError("Invalid consumption value")
+        raise OCEACliError("Invalid consumption value")
     try:
         number = Decimal(str(value).replace(",", "."))
     except InvalidOperation:
-        raise OceaCliError("Invalid consumption value") from None
+        raise OCEACliError("Invalid consumption value") from None
     if not number.is_finite():
-        raise OceaCliError("Invalid consumption value")
+        raise OCEACliError("Invalid consumption value")
     return str(number)
 
 
@@ -442,7 +442,7 @@ def display_unit(value: object) -> str:
 def display_consumptions(response: object, start: date, end: date, today: date) -> None:
     """Display actual readings without assuming the API honored the granularity."""
     if not isinstance(response, dict) or not isinstance(response.get("consommations"), list):
-        raise OceaCliError("Invalid consumption response")
+        raise OCEACliError("Invalid consumption response")
     unit = display_unit(response.get("unite"))
     items = response["consommations"]
     log.debug("Received %d consumption readings", len(items))
@@ -455,17 +455,17 @@ def display_consumptions(response: object, start: date, end: date, today: date) 
     readings = []
     for item in items:
         if not isinstance(item, dict):
-            raise OceaCliError("Invalid consumption item")
+            raise OCEACliError("Invalid consumption item")
         raw_date = item.get("date")
         if not isinstance(raw_date, str) or not re.fullmatch(
             r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})?)?",
             raw_date,
         ):
-            raise OceaCliError("Invalid consumption date")
+            raise OCEACliError("Invalid consumption date")
         try:
             reading_date = datetime.fromisoformat(raw_date).date()
         except ValueError:
-            raise OceaCliError("Invalid consumption date") from None
+            raise OCEACliError("Invalid consumption date") from None
         value = display_number(item.get("valeur"))
         extras = []
         for key, label in (("valeurCoefficientee", "corrected"), ("fuiteEstimee", "estimated leak")):
@@ -474,7 +474,7 @@ def display_consumptions(response: object, start: date, end: date, today: date) 
         for key, label in (("isEstimated", "estimated"), ("consentement", "consent")):
             if key in item:
                 if not isinstance(item[key], bool):
-                    raise OceaCliError("Invalid consumption metadata")
+                    raise OCEACliError("Invalid consumption metadata")
                 extras.append(f"{label}: {'yes' if item[key] else 'no'}")
         if "type" in item:
             response_type = item["type"]
@@ -503,10 +503,10 @@ def display_dwelling_consumptions(
 ) -> None:
     """Describe the safe, known fields of an aggregated consumption response."""
     if not isinstance(response, dict) or not isinstance(response.get("consommations"), list):
-        raise OceaCliError("Invalid consumption response")
+        raise OCEACliError("Invalid consumption response")
     items = response["consommations"]
     if not all(isinstance(item, dict) for item in items):
-        raise OceaCliError("Invalid consumption item")
+        raise OCEACliError("Invalid consumption item")
     known_fields = (
         "date", "valeur", "isEstimated", "consentement", "type",
         "fuiteEstimee", "valeurCoefficientee",
@@ -567,10 +567,10 @@ def main(args: argparse.Namespace) -> int:
         resident_data = fetch_resident(session, access_token)
         occupations = resident_data.get("occupations")
         if not isinstance(occupations, list) or not occupations or not isinstance(occupations[0], dict):
-            raise OceaCliError("No valid occupation found for this account")
+            raise OCEACliError("No valid occupation found for this account")
         local_id = occupations[0].get("logementId")
         if not isinstance(local_id, (str, int)) or isinstance(local_id, bool) or not str(local_id):
-            raise OceaCliError("No dwelling identifier in the first occupation")
+            raise OCEACliError("No dwelling identifier in the first occupation")
         local_id = str(local_id)
         if len(occupations) > 1:
             print(f"Found {len(occupations)} occupations; using the first one.")
@@ -581,7 +581,7 @@ def main(args: argparse.Namespace) -> int:
             for item in fetch_consumptions(session, access_token, local_id):
                 unit = display_unit(item.get("unite"))
                 print(f"  {fluid_label(item.get('fluide'))}: {display_number(item.get('valeur'))} {unit}")
-        except OceaCliError as err:
+        except OCEACliError as err:
             log.error("Dashboard: %s", err)
             failed = True
         except requests.RequestException:
@@ -593,7 +593,7 @@ def main(args: argparse.Namespace) -> int:
         print("\nDwelling consumption:")
         try:
             dwelling_fluids = fetch_dwelling_fluids(session, access_token, local_id)
-        except OceaCliError as err:
+        except OCEACliError as err:
             log.error("Dwelling fluids: %s", err)
             failed = True
             dwelling_fluids = None
@@ -622,7 +622,7 @@ def main(args: argparse.Namespace) -> int:
                     session, access_token, local_id, fluid, payload
                 )
                 display_dwelling_consumptions(response, start, end, today)
-            except OceaCliError as err:
+            except OCEACliError as err:
                 log.error("Dwelling %s: %s", label, err)
                 failed = True
             except requests.RequestException:
@@ -649,7 +649,7 @@ def main(args: argparse.Namespace) -> int:
                 log.debug("PDS %d: requesting daily-granularity consumption", index)
                 response = fetch_pds_consumption(session, access_token, local_id, str(pds_id), payload)
                 display_consumptions(response, start, end, today)
-            except OceaCliError as err:
+            except OCEACliError as err:
                 log.error("PDS %d: %s", index, err)
                 failed = True
             except requests.RequestException:
@@ -660,7 +660,7 @@ def main(args: argparse.Namespace) -> int:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Explore Ocea Smart Building dwelling and measurement-point consumption",
+        description="Explore OCEA Smart Building dwelling and measurement-point consumption",
     )
     parser.add_argument("--email", required=True)
     parser.add_argument("--password", required=True)
@@ -685,8 +685,8 @@ if __name__ == "__main__":
 
     try:
         raise SystemExit(main(args))
-    except OceaCliError as err:
-        log.error("Ocea API: %s", err)
+    except OCEACliError as err:
+        log.error("OCEA API: %s", err)
         raise SystemExit(1) from None
     except requests.RequestException:
         log.error("Network request failed")
