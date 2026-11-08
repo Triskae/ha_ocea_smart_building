@@ -80,11 +80,9 @@ authentication behavior unless a change is explicitly required and tested.
 Before presenting a change as complete, run:
 
 ```bash
-uv run --python 3.14.2 \
-  --with homeassistant==2026.7.3 \
-  --with pytest-homeassistant-custom-component \
-  python -m pytest -q
-uv run --python 3.14.2 python -m compileall -q custom_components tests ocea_cli.py
+uv sync --locked --all-groups
+uv run --locked pytest -q
+uv run --locked python -m compileall -q custom_components tests ocea_cli.py
 python3 -m json.tool custom_components/ocea_smart_building/manifest.json >/dev/null
 python3 -m json.tool custom_components/ocea_smart_building/strings.json >/dev/null
 python3 -m json.tool custom_components/ocea_smart_building/translations/en.json >/dev/null
@@ -97,8 +95,12 @@ git diff --check
 - Run the pinned Ruff lint command used by CI:
 
 ```bash
-uvx --from "ruff==0.16.1" ruff check custom_components tests
+uv run --locked ruff check custom_components tests
 ```
+
+- Development dependencies (Home Assistant, pytest plugin, Ruff) are pinned in
+  the `dev` dependency group of `pyproject.toml` and locked in `uv.lock`. After
+  changing them, run `uv lock` and commit both files.
 
 - Keep detailed tests for the CI and release workflow contracts, including
   triggers, permissions, pinned tools, quality commands, release-version checks,
@@ -112,6 +114,8 @@ uvx --from "ruff==0.16.1" ruff check custom_components tests
   - `custom_components/ocea_smart_building/manifest.json`
   - `custom_components/ocea_smart_building/const.py` (`INTEGRATION_VERSION` and
     the versioned User-Agent product token)
+  - `pyproject.toml` and the project entry of `uv.lock` (run `uv lock` after
+    bumping); a test checks they match the manifest
 - Preserve the existing browser User-Agent prefix when updating the versioned
   product token.
 - A normal push to `main` must not create a release.

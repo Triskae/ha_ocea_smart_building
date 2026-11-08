@@ -125,6 +125,18 @@ logger:
     custom_components.ocea_smart_building: debug
 ```
 
+## Development
+
+The project uses [uv](https://docs.astral.sh/uv/). Development dependencies are pinned in `pyproject.toml` and locked in `uv.lock`.
+
+```bash
+uv sync --locked --all-groups   # create the environment
+uv run pytest -q                # run the tests
+uv run ruff check custom_components tests
+```
+
+When bumping the version, update `manifest.json`, `const.py` and `pyproject.toml`, then run `uv lock`. A test checks that these stay aligned. To update the pinned Home Assistant or tooling versions, edit the `dev` group in `pyproject.toml`, run `uv lock`, and commit both files.
+
 <!-- Badge references -->
 [hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
 [hacs-url]: https://github.com/hacs/integration
