@@ -75,6 +75,15 @@ authentication behavior unless a change is explicitly required and tested.
   partial compliance and explain the gap in the pull request.
 - Keep every rule listed through platinum and give each `exempt` rule a reason;
   `tests/test_quality_scale.py` enforces this.
+- Read the rule's Home Assistant "How it is checked" section before adding a
+  regression test. Automated checks protect specific invariants, not complete
+  compliance; review the rest of the rule before marking it `done`.
+- The tests protect selected `done` statuses. If a rule regresses or no longer
+  applies, update its status and the corresponding test explicitly rather than
+  concealing the change. Run the existing pytest command locally and in CI.
+- Do not assume Home Assistant Core's Pylint checks support custom integrations;
+  verify the pinned tool against both valid code and a deliberate violation
+  before adding it to CI.
 
 ## Manual CLI rules
 
