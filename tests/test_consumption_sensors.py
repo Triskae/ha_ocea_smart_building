@@ -1,4 +1,4 @@
-"""Tests for Ocea consumption sensors."""
+"""Tests for OCEA consumption sensors."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""API client for Ocea Smart Building — uses requests (sync) for reliable B2C auth."""
+"""API client for OCEA Smart Building — uses requests (sync) for reliable B2C auth."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def _generate_pkce() -> tuple[str, str]:
 
 
 class OceaApiClient:
-    """Client to interact with Ocea Smart Building API.
+    """Client to interact with OCEA Smart Building API.
 
     Uses requests.Session (sync) because aiohttp mangles the B2C query
     parameters (encoding '=' in the tx StateProperties value).
@@ -236,7 +236,7 @@ class OceaApiClient:
         if not self._access_token:
             raise OceaAuthError("No access token received")
 
-        _LOGGER.info("Ocea authentication successful")
+        _LOGGER.info("OCEA authentication successful")
 
     # ── Token refresh ─────────────────────────────────────────────────────
 
@@ -283,7 +283,7 @@ class OceaApiClient:
     # ── API requests ──────────────────────────────────────────────────────
 
     def _api_get(self, path: str, retry_auth: bool = True) -> any:
-        """Make an authenticated GET request to the Ocea API."""
+        """Make an authenticated GET request to the OCEA API."""
         if not self._access_token:
             self.authenticate()
 
@@ -316,7 +316,7 @@ class OceaApiClient:
         payload: dict[str, object],
         retry_auth: bool = True,
     ) -> Any:
-        """Make an authenticated JSON POST request to the Ocea API."""
+        """Make an authenticated JSON POST request to the OCEA API."""
         if not self._access_token:
             self.authenticate()
 

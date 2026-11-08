@@ -2,8 +2,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "Ocea Smart Building",
-        "description": "Connect to your Ocea resident space.",
+        "title": "OCEA Smart Building",
+        "description": "Connect to your OCEA resident space.",
         "data": {
           "email": "Email",
           "password": "Password"
@@ -18,21 +18,21 @@
         }
       },
       "reconfigure": {
-        "title": "Reconfigure Ocea Smart Building",
-        "description": "Change the credentials used to access your Ocea resident space. The current password remains hidden and will be kept unless you replace it.",
+        "title": "Reconfigure OCEA Smart Building",
+        "description": "Change the credentials used to access your OCEA resident space. The current password remains hidden and will be kept unless you replace it.",
         "data": {
           "email": "Email",
           "password": "Password"
         },
         "data_description": {
-          "email": "Email address used for your Ocea resident space.",
+          "email": "Email address used for your OCEA resident space.",
           "password": "Enter a new password only to replace the one currently stored."
         }
       }
     },
     "error": {
       "invalid_auth": "Invalid credentials",
-      "cannot_connect": "Cannot connect to Ocea server",
+      "cannot_connect": "Cannot connect to OCEA server",
       "no_occupation": "No dwelling found for this account",
       "unknown": "Unexpected error"
     },
@@ -64,10 +64,10 @@
   },
   "device": {
     "local": {
-      "name": "Ocea - Dwelling {local_id}"
+      "name": "OCEA - Dwelling {local_id}"
     },
     "meter": {
-      "name": "Ocea - Meter {meter_identity}"
+      "name": "OCEA - Meter {meter_identity}"
     }
   }
 }

@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Ocea Smart Building",
+        "title": "OCEA Smart Building",
         "description": "Connectez-vous à votre espace résident Ocea.",
         "data": {
           "email": "Email",
@@ -18,7 +18,7 @@
         }
       },
       "reconfigure": {
-        "title": "Reconfigurer Ocea Smart Building",
+        "title": "Reconfigurer OCEA Smart Building",
         "description": "Modifiez les identifiants utilisés pour accéder à votre espace résident Ocea. Le mot de passe actuel reste masqué et sera conservé si vous ne le remplacez pas.",
         "data": {
           "email": "Email",
@@ -64,10 +64,10 @@
   },
   "device": {
     "local": {
-      "name": "Ocea - Dwelling {local_id}"
+      "name": "OCEA - Dwelling {local_id}"
     },
     "meter": {
-      "name": "Ocea - Compteur {meter_identity}"
+      "name": "OCEA - Compteur {meter_identity}"
     }
   }
 }

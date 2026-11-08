@@ -1,17 +1,17 @@
-# Ocea Smart Building - Home Assistant Integration
+# OCEA Smart Building - Home Assistant Integration
 
 [![hacs][hacs-badge]][hacs-url]
 [![release][release-badge]][release-url]
 ![downloads][downloads-badge]
 
-Home Assistant integration to monitor water and heating consumption from the [Ocea Smart Building](https://espace-resident.ocea-sb.com) resident portal.
+Home Assistant integration to monitor water and heating consumption from the [OCEA Smart Building](https://espace-resident.ocea-sb.com) resident portal.
 
 ## Features
 
 - **Cold water** consumption in m³
 - **Hot water** consumption in m³
 - **CETC heating** consumption in kWh when available for the dwelling
-- Individual water-meter consumption when the Ocea account exposes several PDS
+- Individual water-meter consumption when the OCEA account exposes several PDS
   (points of measurement)
 - Leak detection for each individual water meter
 - Compatible with the **Energy dashboard** (water and energy sections)
@@ -28,7 +28,7 @@ Home Assistant integration to monitor water and heating consumption from the [Oc
 
 1. HACS → Integrations → ⋮ → Custom repositories
 2. Add the repository URL, category **Integration**
-3. Search for "Ocea Smart Building" → Install
+3. Search for "OCEA Smart Building" → Install
 4. Restart Home Assistant
 
 ### Manual
@@ -39,35 +39,35 @@ Copy `custom_components/ocea_smart_building/` into `config/custom_components/` a
 
 [![Open your Home Assistant instance and add the integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=ocea_smart_building)
 
-Settings → Devices & Services → Add Integration → "Ocea Smart Building"
+Settings → Devices & Services → Add Integration → "OCEA Smart Building"
 
-- **Email**: your Ocea resident portal email
-- **Password**: your Ocea password
+- **Email**: your OCEA resident portal email
+- **Password**: your OCEA password
 
-Your dwelling is automatically detected from your Ocea account.
+Your dwelling is automatically detected from your OCEA account.
 
 ### Water meters
 
-Ocea exposes two levels of consumption data:
+OCEA exposes two levels of consumption data:
 
 - the standard cold- and hot-water sensors are totals for the dwelling;
 - individual meter sensors are created for each cold- or hot-water PDS.
 
 Individual sensors use the PDS identifier as their stable Home Assistant
-identity. When Ocea provides a serial number, it is shown in the sensor and
+identity. When OCEA provides a serial number, it is shown in the sensor and
 device name alongside the PDS identifier. This keeps sensors distinguishable
 when several meters measure the same fluid.
 
-When the detailed Ocea response includes `fuiteEstimee`, an additional
+When the detailed OCEA response includes `fuiteEstimee`, an additional
 `Fuite estimée` sensor is created for that meter. It uses m³ and represents the
-latest leak estimate reported by Ocea; it is not created when Ocea provides no
-leak estimate. If Ocea starts reporting a leak after setup, the entity is added
+latest leak estimate reported by Ocea; it is not created when OCEA provides no
+leak estimate. If OCEA starts reporting a leak after setup, the entity is added
 automatically during the next coordinator update; no integration reload is
 needed.
 
 The integration also creates a `Fuite détectée` binary sensor for every
-individual water meter. It is `off` when Ocea reports an estimated leak of
-`0`, and `on` when the estimate is greater than `0`. If Ocea does not provide
+individual water meter. It is `off` when OCEA reports an estimated leak of
+`0`, and `on` when the estimate is greater than `0`. If OCEA does not provide
 an estimate, the binary sensor is temporarily unavailable rather than being
 treated as `off`.
 
@@ -84,10 +84,10 @@ action:
   - service: notify.mobile_app_telephone
     data:
       title: Fuite d'eau détectée
-      message: Le compteur Ocea signale une fuite estimée.
+      message: Le compteur OCEA signale une fuite estimée.
 ```
 
-The integration polls Ocea every five hours. Leak detection therefore follows
+The integration polls OCEA every five hours. Leak detection therefore follows
 that refresh interval and is not real-time.
 
 The integration discovers the available PDS and meter serial numbers during
@@ -95,16 +95,16 @@ setup, then refreshes each meter's consumption for the current calendar month.
 If one meter is temporarily unavailable, its entity remains present but has no
 state until a later refresh succeeds; other meters and dwelling totals continue
 to update. The discovery list is cached while the integration is loaded. Reload
-the integration after a meter is replaced, added, or removed in the Ocea portal
+the integration after a meter is replaced, added, or removed in the OCEA portal
 so Home Assistant can synchronize the meter entities.
 
 ### Reconfiguration
 
-Open Settings → Devices & Services → Ocea Smart Building, then select the native **Reconfigure** action.
+Open Settings → Devices & Services → OCEA Smart Building, then select the native **Reconfigure** action.
 
 - The current email address is prefilled and can be changed.
 - The stored password is never displayed. Leave the password field unchanged to keep it, or enter a new password to replace it.
-- Credentials are validated with Ocea before changes are saved.
+- Credentials are validated with OCEA before changes are saved.
 - Home Assistant reloads the integration only when the validated configuration has actually changed.
 
 ## Energy dashboard
@@ -113,7 +113,7 @@ Add the cold and hot water sensors in Settings → Dashboards → Energy → Wat
 
 Individual water-meter sensors are useful for separate dashboards and
 comparisons. Use the dwelling-level sensors when you need the total reported by
-the Ocea resident portal. Do not add both dwelling totals and their individual
+the OCEA resident portal. Do not add both dwelling totals and their individual
 meters to the same Energy Dashboard water configuration, or the same water
 consumption will be counted twice.
 

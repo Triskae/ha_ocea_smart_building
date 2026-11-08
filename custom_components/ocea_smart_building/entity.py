@@ -1,4 +1,4 @@
-"""Shared entity helpers for Ocea Smart Building."""
+"""Shared entity helpers for OCEA Smart Building."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ def local_device_info(local_id: str) -> DeviceInfo:
     """Build the Home Assistant device descriptor for dwelling totals."""
     return DeviceInfo(
         identifiers={(DOMAIN, local_id)},
-        manufacturer="Ocea Smart Building",
+        manufacturer="OCEA Smart Building",
         translation_key="local",
         translation_placeholders={"local_id": local_id},
     )
@@ -24,7 +24,7 @@ def meter_device_info(local_id: str, meter: OceaMeter) -> DeviceInfo:
     """Build the Home Assistant device descriptor for one meter."""
     return DeviceInfo(
         identifiers={(DOMAIN, f"{local_id}_{meter.identifier}")},
-        manufacturer="Ocea Smart Building",
+        manufacturer="OCEA Smart Building",
         serial_number=meter.serial_number,
         suggested_area=meter.pds.location,
         translation_key="meter",
@@ -43,6 +43,6 @@ def meter_entity_unique_id(local_id: str, meter: OceaMeter, key: str) -> str:
 
 
 class OceaEntity(CoordinatorEntity[OceaDataUpdateCoordinator]):
-    """Base class for Ocea coordinator entities."""
+    """Base class for OCEA coordinator entities."""
 
     _attr_has_entity_name = True

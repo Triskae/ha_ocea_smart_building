@@ -1,4 +1,4 @@
-"""Binary sensor platform for Ocea Smart Building leak detection."""
+"""Binary sensor platform for OCEA Smart Building leak detection."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ async def async_setup_entry(
 
 
 class OceaLeakBinarySensor(OceaEntity, BinarySensorEntity):
-    """Represent whether Ocea estimates a leak for one water meter."""
+    """Represent whether OCEA estimates a leak for one water meter."""
 
     _attr_translation_key = "fuite"
     _attr_device_class = BinarySensorDeviceClass.MOISTURE

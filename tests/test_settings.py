@@ -60,7 +60,8 @@ def test_manifest_and_user_agent_versions_are_aligned() -> None:
     constants = _load_constants()
 
     assert constants.INTEGRATION_VERSION == manifest["version"]
-    assert f"Home-Assistant-Ocea-Smart-Building/{manifest['version']}" in constants.UA
+    assert manifest["name"] == "OCEA Smart Building"
+    assert f"Home-Assistant-OCEA-Smart-Building/{manifest['version']}" in constants.UA
 
 
 def test_release_workflow_is_tag_only() -> None:
@@ -76,6 +77,7 @@ def test_release_workflow_is_tag_only() -> None:
     assert 'manifest["version"] != version' in workflow
     assert "constants.INTEGRATION_VERSION != version" in workflow
     assert "expected_user_agent not in constants.UA" in workflow
+    assert '--title "OCEA Smart Building $GITHUB_REF_NAME"' in workflow
     assert 'gh release create "$GITHUB_REF_NAME"' in workflow
     assert '--verify-tag' in workflow
     assert '--latest' in workflow

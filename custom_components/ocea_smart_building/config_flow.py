@@ -1,4 +1,4 @@
-"""Config flow for Ocea Smart Building integration."""
+"""Config flow for OCEA Smart Building integration."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Ocea Smart Building."""
+    """Handle a config flow for OCEA Smart Building."""
 
     VERSION = 1
 
@@ -66,7 +66,7 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                     name = resident.get("prenom", "")
 
                     return self.async_create_entry(
-                        title=f"Ocea - {name}" if name else f"Ocea - {local_id}",
+                        title=f"OCEA - {name}" if name else f"OCEA - {local_id}",
                         data={
                             CONF_EMAIL: user_input[CONF_EMAIL],
                             CONF_PASSWORD: user_input[CONF_PASSWORD],
@@ -171,7 +171,7 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                     local_id = occupations[0].get("logementId", "")
                     resident = resident_data.get("resident", {})
                     name = resident.get("prenom", "")
-                    title = f"Ocea - {name}" if name else f"Ocea - {local_id}"
+                    title = f"OCEA - {name}" if name else f"OCEA - {local_id}"
                     unique_id = email.lower()
                     existing_entry = (
                         self.hass.config_entries.async_entry_for_domain_unique_id(
