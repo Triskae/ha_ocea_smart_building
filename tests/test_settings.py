@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import tomllib
 from pathlib import Path
 from types import ModuleType
 
@@ -25,12 +26,10 @@ def _assert_ci_quality_gate(workflow: str) -> None:
         in workflow
     )
     assert 'python-version: "3.14.2"' in workflow
-    assert "--with homeassistant==2026.7.3" in workflow
-    assert "--with pytest-homeassistant-custom-component" in workflow
-    assert "python -m pytest -q" in workflow
-    assert 'uvx --from "ruff==0.16.1"' in workflow
-    assert "ruff check custom_components tests" in workflow
-    assert "python -m compileall -q custom_components tests ocea_cli.py" in workflow
+    assert "uv sync --locked --all-groups" in workflow
+    assert "uv run pytest -q" in workflow
+    assert "uv run ruff check custom_components tests" in workflow
+    assert "uv run python -m compileall -q custom_components tests ocea_cli.py" in workflow
     assert "python3 -m json.tool" in workflow
     assert "custom_components/ocea_smart_building/manifest.json" in workflow
     assert "custom_components/ocea_smart_building/strings.json" in workflow
@@ -63,6 +62,24 @@ def test_manifest_and_user_agent_versions_are_aligned() -> None:
     assert f"Home-Assistant-Ocea-Smart-Building/{manifest['version']}" in constants.UA
 
 
+def test_pyproject_and_lock_versions_match_manifest() -> None:
+    """Test project metadata and the uv lock file follow the manifest version."""
+    manifest = json.loads(
+        (INTEGRATION_PATH / "manifest.json").read_text(encoding="utf-8")
+    )
+    root = Path(__file__).parents[1]
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    lock = tomllib.loads((root / "uv.lock").read_text(encoding="utf-8"))
+    locked_project = next(
+        package
+        for package in lock["package"]
+        if package["name"] == pyproject["project"]["name"]
+    )
+
+    assert pyproject["project"]["version"] == manifest["version"]
+    assert locked_project["version"] == manifest["version"]
+
+
 def test_release_workflow_is_tag_only() -> None:
     """Test normal branch pushes cannot publish a GitHub release."""
     workflow = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")
@@ -72,6 +89,11 @@ def test_release_workflow_is_tag_only() -> None:
     assert "permissions:\n  contents: write" in workflow
     assert "uses: actions/checkout@v4" in workflow
     assert "fetch-depth: 0" in workflow
+    assert (
+        "uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b"
+        in workflow
+    )
+    assert 'python-version: "3.14.2"' in workflow
     assert 're.fullmatch(r"v\\d+\\.\\d+\\.\\d+", tag)' in workflow
     assert 'manifest["version"] != version' in workflow
     assert "constants.INTEGRATION_VERSION != version" in workflow

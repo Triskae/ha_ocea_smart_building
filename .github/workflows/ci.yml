@@ -32,22 +32,17 @@ jobs:
           python-version: "3.14.2"
           enable-cache: true
 
+      - name: Sync dependencies
+        run: uv sync --locked --all-groups
+
       - name: Run Home Assistant tests
-        run: >-
-          uv run --python 3.14.2
-          --with homeassistant==2026.7.3
-          --with pytest-homeassistant-custom-component
-          python -m pytest -q
+        run: uv run pytest -q
 
       - name: Run Ruff
-        run: >-
-          uvx --from "ruff==0.16.1"
-          ruff check custom_components tests
+        run: uv run ruff check custom_components tests
 
       - name: Check Python compilation
-        run: >-
-          uv run --python 3.14.2
-          python -m compileall -q custom_components tests ocea_cli.py
+        run: uv run python -m compileall -q custom_components tests ocea_cli.py
 
       - name: Validate JSON files
         run: |
