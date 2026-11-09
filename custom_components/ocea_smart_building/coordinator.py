@@ -1,4 +1,4 @@
-"""DataUpdateCoordinator for Ocea Smart Building."""
+"""DataUpdateCoordinator for OCEA Smart Building."""
 
 from __future__ import annotations
 
@@ -88,7 +88,7 @@ def _as_update_error(err: Exception) -> Exception:
 
 
 class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
-    """Manage fetching Ocea consumption data."""
+    """Manage fetching OCEA consumption data."""
 
     def __init__(
         self,
@@ -117,8 +117,8 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
             raise _as_update_error(err) from err
 
     async def _async_update_data(self) -> OceaData:
-        """Fetch data from Ocea API (runs sync client in executor)."""
-        _LOGGER.debug("Ocea coordinator: starting data fetch")
+        """Fetch data from OCEA API (runs sync client in executor)."""
+        _LOGGER.debug("OCEA coordinator: starting data fetch")
         try:
             raw_data = await self.hass.async_add_executor_job(
                 self.client.get_consumptions
@@ -132,7 +132,7 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
 
         data = OceaData(totals=self._aggregate_totals(raw_data), meters=meters)
         _LOGGER.debug(
-            "Ocea consumption data updated: %d aggregate values, %d individual meters",
+            "OCEA consumption data updated: %d aggregate values, %d individual meters",
             len(data.totals),
             len(data.meters),
         )
@@ -178,7 +178,7 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
         totals: dict[str, float] = {}
         for item in raw_data:
             fluide = item.get("fluide", "")
-            # Ocea uses comma as decimal separator
+            # OCEA uses comma as decimal separator
             valeur = float(item.get("valeur", "0").replace(",", "."))
             totals[WATER_FLUID_SENSOR_KEYS.get(fluide, fluide.lower())] = valeur
         return totals

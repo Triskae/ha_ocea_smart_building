@@ -1,4 +1,4 @@
-"""Tests for the Ocea Smart Building config flow."""
+"""Tests for the OCEA Smart Building config flow."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from custom_components.ocea_smart_building.const import (
 OLD_EMAIL = "resident@example.com"
 OLD_PASSWORD = "stored-secret"
 OLD_LOCAL_ID = "local-123"
-OLD_TITLE = "Ocea - Alice"
+OLD_TITLE = "OCEA - Alice"
 
 RESIDENT_DATA = {
     "resident": {"prenom": "Alice"},
@@ -119,7 +119,7 @@ async def test_successful_reconfiguration(
         "access_token": "hidden-token",
     }
     assert config_entry.unique_id == new_email
-    assert config_entry.title == "Ocea - Bob"
+    assert config_entry.title == "OCEA - Bob"
     schedule_reload.assert_called_once_with(config_entry.entry_id)
     client_class.return_value.close.assert_called_once_with()
 
@@ -245,7 +245,7 @@ def test_reconfigure_source_strings_are_complete() -> None:
         config = json.load(strings_file)["config"]
 
     step = config["step"]["reconfigure"]
-    assert step["title"] == "Reconfigurer Ocea Smart Building"
+    assert step["title"] == "Reconfigurer OCEA Smart Building"
     assert set(step["data"]) == {CONF_EMAIL, CONF_PASSWORD}
     assert set(step["data_description"]) == {CONF_EMAIL, CONF_PASSWORD}
     assert config["abort"]["reconfigure_successful"] == (
@@ -256,8 +256,8 @@ def test_reconfigure_source_strings_are_complete() -> None:
 @pytest.mark.parametrize(
     ("language", "title", "success"),
     [
-        ("fr", "Reconfigurer Ocea Smart Building", "La reconfiguration a réussi"),
-        ("en", "Reconfigure Ocea Smart Building", "Reconfiguration was successful"),
+        ("fr", "Reconfigurer OCEA Smart Building", "La reconfiguration a réussi"),
+        ("en", "Reconfigure OCEA Smart Building", "Reconfiguration was successful"),
     ],
 )
 def test_reconfigure_translations(language: str, title: str, success: str) -> None:

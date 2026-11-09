@@ -2,8 +2,8 @@
 
 ## Project scope
 
-This repository contains a public Home Assistant custom integration for Ocea
-Smart Building and a manual Python CLI for testing the Ocea resident API. Keep
+This repository contains a public Home Assistant custom integration for OCEA
+Smart Building and a manual Python CLI for testing the OCEA resident API. Keep
 the integration installable with HACS and compatible with the Home Assistant
 version targeted by the project. Preserve the existing Azure AD B2C
 authentication behavior unless a change is explicitly required and tested.
@@ -23,7 +23,7 @@ authentication behavior unless a change is explicitly required and tested.
   API responses containing account data.
 - Never log or expose the email, stored password, tokens, or session cookies from
   a Home Assistant config entry.
-- Credentials must be validated against Ocea before a config-flow change is
+- Credentials must be validated against OCEA before a config-flow change is
   saved.
 - In the reconfiguration form, never expose or prefill the stored password. The
   unchanged-password sentinel must preserve the currently stored password.
@@ -42,7 +42,7 @@ authentication behavior unless a change is explicitly required and tested.
   the native reconfigure flow also provides Home Assistant's standard
   **Reconfigure** button without changing the existing storage model.
 - Keep email and an optional replacement password editable after installation.
-  The dwelling `local_id` is discovered from the validated Ocea account and must
+  The dwelling `local_id` is discovered from the validated OCEA account and must
   not be exposed as a manually editable field.
 - Use `FlowResult` from `homeassistant.data_entry_flow`; do not use
   `ConfigFlowResult`.
@@ -126,7 +126,7 @@ uvx --from "ruff==0.16.1" ruff check custom_components tests
 
 ```bash
 git push origin main
-git tag -a vX.Y.Z -m "Ocea Smart Building vX.Y.Z"
+git tag -a vX.Y.Z -m "OCEA Smart Building vX.Y.Z"
 git push origin vX.Y.Z
 ```
 

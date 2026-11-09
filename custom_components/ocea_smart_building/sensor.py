@@ -1,4 +1,4 @@
-"""Sensor platform for Ocea Smart Building water consumption."""
+"""Sensor platform for OCEA Smart Building water consumption."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ PARALLEL_UPDATES = 0
 
 @dataclass(frozen=True, kw_only=True)
 class OceaSensorEntityDescription(SensorEntityDescription):
-    """Describe an Ocea sensor entity."""
+    """Describe an OCEA sensor entity."""
 
     data_key: str
 
@@ -85,7 +85,7 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Ocea Smart Building sensors from a config entry."""
+    """Set up OCEA Smart Building sensors from a config entry."""
     coordinator: OceaDataUpdateCoordinator = hass.data[DOMAIN][config_entry.entry_id]
     local_id = config_entry.data[CONF_LOCAL_ID]
     descriptions = {description.key: description for description in SENSOR_TYPES}
@@ -141,7 +141,7 @@ async def async_setup_entry(
 
     @callback
     def _async_add_new_leak_entities() -> None:
-        """Add leak entities when Ocea starts reporting an estimate."""
+        """Add leak entities when OCEA starts reporting an estimate."""
         new_entities: list[OceaMeterSensor] = []
         if coordinator.data is None:
             return
@@ -167,7 +167,7 @@ async def async_setup_entry(
 
 
 class OceaWaterSensor(OceaEntity, SensorEntity):
-    """Representation of an Ocea consumption sensor."""
+    """Representation of an OCEA consumption sensor."""
 
     entity_description: OceaSensorEntityDescription
 

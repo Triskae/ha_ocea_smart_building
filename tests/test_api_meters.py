@@ -1,4 +1,4 @@
-"""Tests for individual Ocea water-meter API calls."""
+"""Tests for individual OCEA water-meter API calls."""
 
 from __future__ import annotations
 

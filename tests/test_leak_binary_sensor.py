@@ -1,4 +1,4 @@
-"""Tests for Ocea leak binary sensors."""
+"""Tests for OCEA leak binary sensors."""
 
 from __future__ import annotations
 

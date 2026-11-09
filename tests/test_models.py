@@ -1,4 +1,4 @@
-"""Tests for typed Ocea meter models."""
+"""Tests for typed OCEA meter models."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from custom_components.ocea_smart_building.models import (
 
 
 def test_pds_model_maps_ocea_response() -> None:
-    """Test PDS fields are normalized from the Ocea response."""
+    """Test PDS fields are normalized from the OCEA response."""
     pds = OceaPds.from_api(
         {
             "id": "pds-cold-1",
@@ -33,7 +33,7 @@ def test_pds_model_maps_ocea_response() -> None:
 
 
 def test_meter_model_links_pds_and_device() -> None:
-    """Test a PDS is enriched with its Ocea device metadata."""
+    """Test a PDS is enriched with its OCEA device metadata."""
     meter = OceaMeter.from_api(
         {
             "id": "pds-cold-1",

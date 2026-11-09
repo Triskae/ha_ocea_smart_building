@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CLI script to authenticate with Ocea Smart Building and fetch water consumption.
+CLI script to authenticate with OCEA Smart Building and fetch water consumption.
 
 Usage:
     python3 ocea_cli.py --email your@email.com --password yourpass
@@ -389,7 +389,7 @@ def main(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Fetch water consumption from Ocea Smart Building",
+        description="Fetch water consumption from OCEA Smart Building",
     )
     parser.add_argument("--email", required=True)
     parser.add_argument("--password", required=True)

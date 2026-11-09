@@ -1,4 +1,4 @@
-"""Typed models for Ocea water-meter data."""
+"""Typed models for OCEA water-meter data."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any
 
 @dataclass(frozen=True, slots=True)
 class OceaPds:
-    """Ocea point of measurement metadata."""
+    """OCEA point of measurement metadata."""
 
     id: str
     fluid: str
@@ -19,7 +19,7 @@ class OceaPds:
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> OceaPds:
-        """Build a PDS model from an Ocea response."""
+        """Build a PDS model from an OCEA response."""
         return cls(
             id=str(data.get("id", "")),
             fluid=str(data.get("fluide", "")),
@@ -32,7 +32,7 @@ class OceaPds:
 
 @dataclass(frozen=True, slots=True)
 class OceaMeter:
-    """Ocea PDS enriched with its installed device metadata."""
+    """OCEA PDS enriched with its installed device metadata."""
 
     pds: OceaPds
     device_id: str | None = None
@@ -42,7 +42,7 @@ class OceaMeter:
 
     @property
     def identifier(self) -> str:
-        """Return the stable Ocea identifier for this meter."""
+        """Return the stable OCEA identifier for this meter."""
         return self.pds.id
 
     @property
@@ -71,7 +71,7 @@ class OceaMeter:
 
 @dataclass(frozen=True, slots=True)
 class OceaMeterReading:
-    """Current-month consumption for one Ocea meter."""
+    """Current-month consumption for one OCEA meter."""
 
     meter: OceaMeter
     value: float | None

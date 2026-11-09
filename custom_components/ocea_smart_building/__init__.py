@@ -1,4 +1,4 @@
-"""The Ocea Smart Building integration."""
+"""The OCEA Smart Building integration."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Ocea Smart Building from a config entry."""
+    """Set up OCEA Smart Building from a config entry."""
     client = OceaApiClient(
         email=entry.data[CONF_EMAIL],
         password=entry.data[CONF_PASSWORD],
