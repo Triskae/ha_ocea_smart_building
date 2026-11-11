@@ -24,7 +24,7 @@ from .entity import (
     meter_device_info,
     meter_entity_unique_id,
 )
-from .models import OceaMeter
+from .ocea import OceaMeter
 
 PARALLEL_UPDATES = 0
 

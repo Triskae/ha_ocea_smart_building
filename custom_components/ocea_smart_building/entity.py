@@ -7,7 +7,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import OceaDataUpdateCoordinator
-from .models import OceaMeter
+from .ocea import OceaMeter
 
 
 def local_device_info(local_id: str) -> DeviceInfo:
@@ -22,13 +22,16 @@ def local_device_info(local_id: str) -> DeviceInfo:
 
 def meter_device_info(local_id: str, meter: OceaMeter) -> DeviceInfo:
     """Build the Home Assistant device descriptor for one meter."""
+    identity = f"PDS {meter.identifier}"
+    if meter.serial_number:
+        identity = f"{meter.serial_number} ({identity})"
     return DeviceInfo(
         identifiers={(DOMAIN, f"{local_id}_{meter.identifier}")},
         manufacturer="Ocea Smart Building",
         serial_number=meter.serial_number,
         suggested_area=meter.pds.location,
         translation_key="meter",
-        translation_placeholders={"meter_identity": meter.display_name},
+        translation_placeholders={"meter_identity": identity},
     )
 
 

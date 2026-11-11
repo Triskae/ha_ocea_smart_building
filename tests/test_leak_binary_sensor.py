@@ -10,12 +10,12 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ocea_smart_building.binary_sensor import OceaLeakBinarySensor
 from custom_components.ocea_smart_building.const import DOMAIN
-from custom_components.ocea_smart_building.coordinator import OceaDataUpdateCoordinator
-from custom_components.ocea_smart_building.models import (
+from custom_components.ocea_smart_building.coordinator import (
     OceaData,
-    OceaMeter,
+    OceaDataUpdateCoordinator,
     OceaMeterReading,
 )
+from custom_components.ocea_smart_building.ocea import OceaMeter
 
 
 def _sensor(

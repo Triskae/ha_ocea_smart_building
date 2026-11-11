@@ -6,18 +6,19 @@ import logging
 from typing import Any
 
 import voluptuous as vol
+from aiohttp import ClientError
 from homeassistant.config_entries import ConfigFlow
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.selector import (
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
 )
-from requests import RequestException
 
-from .api import OceaApiClient, OceaApiError, OceaAuthError
-from .const import CONF_LOCAL_ID, DOMAIN, PASSWORD_NOT_CHANGED
+from .const import CONF_LOCAL_ID, DOMAIN, PASSWORD_NOT_CHANGED, UA
+from .ocea import OceaApiClient, OceaApiError, OceaAuthError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,24 +38,27 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(user_input[CONF_EMAIL].lower())
             self._abort_if_unique_id_configured()
 
+            session = async_create_clientsession(
+                self.hass, auto_cleanup=False, connector_owner=False
+            )
             client = OceaApiClient(
                 email=user_input[CONF_EMAIL],
+                user_agent=UA,
+                session=session,
                 password=user_input[CONF_PASSWORD],
             )
 
             try:
-                resident_data = await self.hass.async_add_executor_job(
-                    client.validate_credentials
-                )
+                resident_data = await client.validate_credentials()
             except OceaAuthError:
                 errors["base"] = "invalid_auth"
                 resident_data = None
-            except Exception:
-                _LOGGER.exception("Unexpected error during config flow")
+            except Exception:  # noqa: BLE001
+                _LOGGER.error("Unexpected error during config flow")
                 errors["base"] = "unknown"
                 resident_data = None
             finally:
-                client.close()
+                session.detach()
 
             if not errors and resident_data:
                 occupations = resident_data.get("occupations", [])
@@ -97,14 +101,19 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             reauth_entry = self._get_reauth_entry()
+            session = async_create_clientsession(
+                self.hass, auto_cleanup=False, connector_owner=False
+            )
             client = OceaApiClient(
                 email=user_input[CONF_EMAIL],
+                user_agent=UA,
+                session=session,
                 password=user_input[CONF_PASSWORD],
                 local_id=reauth_entry.data[CONF_LOCAL_ID],
             )
 
             try:
-                await self.hass.async_add_executor_job(client.validate_credentials)
+                await client.validate_credentials()
                 return self.async_update_reload_and_abort(
                     reauth_entry,
                     data={
@@ -115,11 +124,11 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             except OceaAuthError:
                 errors["base"] = "invalid_auth"
-            except Exception:
-                _LOGGER.exception("Unexpected error during reauth")
+            except Exception:  # noqa: BLE001
+                _LOGGER.error("Unexpected error during reauth")
                 errors["base"] = "unknown"
             finally:
-                client.close()
+                session.detach()
 
         return self.async_show_form(
             step_id="reauth_confirm",
@@ -145,19 +154,22 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             if password == PASSWORD_NOT_CHANGED:
                 password = reconfigure_entry.data[CONF_PASSWORD]
 
+            session = async_create_clientsession(
+                self.hass, auto_cleanup=False, connector_owner=False
+            )
             client = OceaApiClient(
                 email=email,
+                user_agent=UA,
+                session=session,
                 password=password,
                 local_id=reconfigure_entry.data[CONF_LOCAL_ID],
             )
 
             try:
-                resident_data = await self.hass.async_add_executor_job(
-                    client.validate_credentials
-                )
+                resident_data = await client.validate_credentials()
             except OceaAuthError:
                 errors["base"] = "invalid_auth"
-            except (OceaApiError, RequestException):
+            except (OceaApiError, ClientError, TimeoutError):
                 errors["base"] = "cannot_connect"
             except Exception:  # noqa: BLE001
                 # Avoid logging exception details that could contain credentials.
@@ -196,7 +208,7 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                         reload_even_if_entry_is_unchanged=False,
                     )
             finally:
-                client.close()
+                session.detach()
 
         return self.async_show_form(
             step_id="reconfigure",
