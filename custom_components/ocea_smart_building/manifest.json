@@ -1,6 +1,10 @@
 {
   "domain": "ocea_smart_building",
   "name": "Ocea Smart Building",
+  "categories": [
+    "water.meters_leak_detection",
+    "energy.meters_monitoring"
+  ],
   "codeowners": [
     "@triskae"
   ],
@@ -9,9 +13,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/Triskae/ha_ocea_smart_building/issues",
   "requirements": [],
-  "version": "1.2.0",
-  "categories": [
-    "water.meters_leak_detection",
-    "energy.meters_monitoring"
-  ]
+  "version": "1.2.0"
 }
