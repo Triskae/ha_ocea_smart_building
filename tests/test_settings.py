@@ -32,6 +32,12 @@ def _assert_ci_quality_gate(workflow: str) -> None:
     assert "python -m pytest -q" in workflow
     assert 'uvx --from "ruff==0.16.1"' in workflow
     assert "ruff check custom_components tests" in workflow
+    assert "--with mypy==1.18.2" in workflow
+    assert "python -m mypy --strict --disallow-any-explicit --follow-imports=silent" in workflow
+    assert "custom_components/ocea_smart_building/ocea" in workflow
+    assert "--with pytest-cov==7.1.0" in workflow
+    assert "--cov=custom_components.ocea_smart_building.ocea" in workflow
+    assert "python3 scripts/check_ocea_coverage.py" in workflow
     assert "python -m compileall -q custom_components tests ocea_cli.py" in workflow
     assert "python3 -m json.tool" in workflow
     assert "custom_components/ocea_smart_building/manifest.json" in workflow
@@ -108,6 +114,12 @@ def test_ci_runs_quality_scale_tests_as_a_blocking_part_of_pytest() -> None:
     ]
     assert len(pytest_steps) == 1
     step = pytest_steps[0]
-    assert step["run"].split()[-4:] == ["python", "-m", "pytest", "-q"]
+    command = step["run"].replace("${{ runner.temp }}", "/tmp").split()
+    pytest_args = command[command.index("pytest") + 1:]
+    assert pytest_args[0] == "-q"
+    assert all(
+        argument.startswith(("--cov=", "--cov-report="))
+        for argument in pytest_args[1:]
+    )
     assert step.get("continue-on-error", "false") == "false"
     assert not step.get("if")

@@ -4,13 +4,13 @@ rules:
     status: exempt
     comment: The integration does not register service actions.
   appropriate-polling: done
-  brands: done
+  brands: todo
   common-modules: done
   config-flow-test-coverage: todo
   config-flow: todo
   dependency-transparency:
     status: exempt
-    comment: No external requirement; requests is provided by Home Assistant.
+    comment: The integration has no third-party runtime requirements; requests is only used by the standalone CLI.
   docs-actions:
     status: exempt
     comment: The integration does not provide service actions.
@@ -25,7 +25,7 @@ rules:
   docs-removal-instructions: todo
   entity-event-setup:
     status: exempt
-    comment: Entities are updated by the coordinator and subscribe to no events.
+    comment: Entities use coordinator updates and do not subscribe to external events.
   entity-unique-id: done
   has-entity-name: done
   runtime-data: todo
@@ -37,12 +37,12 @@ rules:
   action-exceptions:
     status: exempt
     comment: The integration does not provide service actions.
-  config-entry-unloading: done
+  config-entry-unloading: todo
   docs-configuration-parameters:
     status: exempt
     comment: The integration does not provide an options flow.
   docs-installation-parameters: done
-  entity-unavailable: done
+  entity-unavailable: todo
   integration-owner: done
   log-when-unavailable: todo
   parallel-updates: done
@@ -54,27 +54,27 @@ rules:
   diagnostics: todo
   discovery-update-info:
     status: exempt
-    comment: Cloud service; devices cannot be discovered on the network.
+    comment: The cloud service does not provide network discovery information.
   discovery:
     status: exempt
-    comment: Cloud service; devices cannot be discovered on the network.
+    comment: The integration is configured with a resident account and has no discoverable network devices.
   docs-data-update: done
   docs-examples: done
   docs-known-limitations: done
   docs-supported-devices:
     status: exempt
-    comment: Data comes from the resident account, not from specific devices.
+    comment: The integration uses resident-account data rather than targeting specific devices.
   docs-supported-functions: done
   docs-troubleshooting: todo
-  docs-use-cases: done
+  docs-use-cases: todo
   dynamic-devices: todo
   entity-category:
     status: exempt
-    comment: All entities are primary measurements.
+    comment: All entities expose primary consumption measurements.
   entity-device-class: done
   entity-disabled-by-default:
     status: exempt
-    comment: There are only a few entities and none is noisy.
+    comment: The integration's entities are primary consumption measurements and are not noisy.
   entity-translations: done
   exception-translations: todo
   icon-translations: todo
@@ -83,6 +83,8 @@ rules:
   stale-devices: todo
 
   # Platinum
-  async-dependency: todo
-  inject-websession: todo
+  async-dependency:
+    status: exempt
+    comment: The integration has no third-party runtime dependency; its HTTP client uses Home Assistant's aiohttp support.
+  inject-websession: done
   strict-typing: todo

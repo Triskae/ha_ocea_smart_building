@@ -98,6 +98,11 @@ to update. The discovery list is cached while the integration is loaded. Reload
 the integration after a meter is replaced, added, or removed in the Ocea portal
 so Home Assistant can synchronize the meter entities.
 
+### Developer structure
+
+See [docs/architecture.md](docs/architecture.md) for module responsibilities,
+data flow, and contributor-facing design invariants.
+
 ### Reconfiguration
 
 Open Settings → Devices & Services → Ocea Smart Building, then select the native **Reconfigure** action.

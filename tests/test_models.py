@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from custom_components.ocea_smart_building.models import (
-    OceaMeter,
-    OceaMeterReading,
-    OceaPds,
-)
+import pytest
+
+from custom_components.ocea_smart_building.coordinator import OceaMeterReading
+from custom_components.ocea_smart_building.entity import meter_device_info
+from custom_components.ocea_smart_building.ocea import OceaApiError, OceaMeter, OceaPds
 
 
 def test_pds_model_maps_ocea_response() -> None:
@@ -51,7 +51,9 @@ def test_meter_model_links_pds_and_device() -> None:
     assert meter.serial_number == "SERIAL-1"
     assert meter.device_id == "device-1"
     assert meter.identifier == "pds-cold-1"
-    assert meter.display_name == "SERIAL-1 (PDS pds-cold-1)"
+    assert meter_device_info("local-123", meter)["translation_placeholders"] == {
+        "meter_identity": "SERIAL-1 (PDS pds-cold-1)"
+    }
 
 
 def test_meter_display_name_falls_back_to_pds_id() -> None:
@@ -61,7 +63,9 @@ def test_meter_display_name_falls_back_to_pds_id() -> None:
         None,
     )
 
-    assert meter.display_name == "PDS pds-cold-1"
+    assert meter_device_info("local-123", meter)["translation_placeholders"] == {
+        "meter_identity": "PDS pds-cold-1"
+    }
 
 
 def test_meter_reading_can_be_unavailable() -> None:
@@ -109,3 +113,18 @@ def test_meter_reading_keeps_consumption_metadata() -> None:
     assert reading.estimated_leak == 0.0
     assert reading.consent is True
     assert reading.response_type == "ConsommationEauResponse"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("numeroSerie", 3), ("id", []), ("datePose", False), ("fc", "invalid")],
+)
+def test_invalid_device_fields_are_explicit_errors(field: str, value: object) -> None:
+    """Reject invalid response types without including field values in errors."""
+    with pytest.raises(OceaApiError, match="Invalid meter field"):
+        OceaMeter.from_api({"id": "pds-1"}, {field: value})
+
+
+def test_invalid_pds_factor_is_an_explicit_error() -> None:
+    with pytest.raises(OceaApiError, match="Invalid meter field: fce"):
+        OceaPds.from_api({"id": "pds-1", "fce": True})
