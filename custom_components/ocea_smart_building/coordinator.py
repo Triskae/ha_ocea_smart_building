@@ -3,20 +3,42 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
-from requests import RequestException
 
-from .api import OceaApiClient, OceaApiError, OceaAuthError
 from .const import DEFAULT_SCAN_INTERVAL, DOMAIN, WATER_FLUID_SENSOR_KEYS
-from .models import OceaData, OceaMeter, OceaMeterReading
+from .ocea import OceaApiClient, OceaApiError, OceaAuthError, OceaMeter
+
+
+@dataclass(frozen=True, slots=True)
+class OceaMeterReading:
+    """Current-month consumption for one Ocea meter."""
+
+    meter: OceaMeter
+    value: float | None
+    latest_date: str | None
+    unit: str | None = None
+    estimated_leak: float | None = None
+    consent: bool | None = None
+    response_type: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OceaData:
+    """Coordinator payload: dwelling totals and per-meter readings."""
+
+    totals: dict[str, float]
+    meters: dict[str, OceaMeterReading]
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -84,7 +106,9 @@ def _as_update_error(err: Exception) -> Exception:
         return ConfigEntryAuthFailed(f"Authentication failed: {err}")
     if isinstance(err, OceaApiError):
         return UpdateFailed(f"Error fetching data: {err}")
-    return UpdateFailed(f"Unexpected error: {err}")
+    if isinstance(err, (ClientError, TimeoutError)):
+        return UpdateFailed("Error connecting to Ocea")
+    return UpdateFailed("Unexpected error fetching data")
 
 
 class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
@@ -110,23 +134,17 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
     async def _async_setup(self) -> None:
         """Discover the dwelling's water meters once, before the first refresh."""
         try:
-            self._meters = await self.hass.async_add_executor_job(
-                self._discover_meters
-            )
+            self._meters = await self._discover_meters()
         except Exception as err:
             raise _as_update_error(err) from err
 
     async def _async_update_data(self) -> OceaData:
-        """Fetch data from Ocea API (runs sync client in executor)."""
+        """Fetch data from the Ocea API."""
         _LOGGER.debug("Ocea coordinator: starting data fetch")
         try:
-            raw_data = await self.hass.async_add_executor_job(
-                self.client.get_consumptions
-            )
+            raw_data = await self.client.get_consumptions()
             payload = _current_month_payload(dt_util.now().date())
-            meters = await self.hass.async_add_executor_job(
-                self._fetch_readings, payload
-            )
+            meters = await self._fetch_readings(payload)
         except Exception as err:
             raise _as_update_error(err) from err
 
@@ -138,14 +156,14 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
         )
         return data
 
-    def _discover_meters(self) -> dict[str, OceaMeter]:
-        """Discover the configured dwelling's water meters (blocking I/O)."""
+    async def _discover_meters(self) -> dict[str, OceaMeter]:
+        """Discover the configured dwelling's water meters."""
         pds_data = [
             item
-            for item in self.client.get_pds()
+            for item in await self.client.get_pds()
             if item.get("id") and item.get("fluide") in WATER_FLUID_SENSOR_KEYS
         ]
-        appareils = self.client.get_appareils([str(item["id"]) for item in pds_data])
+        appareils = await self.client.get_appareils([str(item["id"]) for item in pds_data])
         appareils_by_pds = {
             str(item["pdsId"]): item for item in appareils if item.get("pdsId")
         }
@@ -156,19 +174,19 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
             for item in pds_data
         }
 
-    def _fetch_readings(self, payload: dict[str, str]) -> dict[str, OceaMeterReading]:
-        """Fetch current-month consumption for each meter (blocking I/O)."""
+    async def _fetch_readings(self, payload: dict[str, str]) -> dict[str, OceaMeterReading]:
+        """Fetch current-month consumption for each meter."""
         readings = {
             pds_id: OceaMeterReading(meter=meter, value=None, latest_date=None)
             for pds_id, meter in self._meters.items()
         }
         for pds_id, meter in self._meters.items():
             try:
-                response = self.client.get_pds_consumption(pds_id, payload)
+                response = await self.client.get_pds_consumption(pds_id, dict(payload))
                 readings[pds_id] = _build_meter_data(meter, response)
             except OceaAuthError:
                 raise
-            except (OceaApiError, RequestException):
+            except (OceaApiError, ClientError, TimeoutError):
                 _LOGGER.warning("Unable to update one water meter")
         return readings
 

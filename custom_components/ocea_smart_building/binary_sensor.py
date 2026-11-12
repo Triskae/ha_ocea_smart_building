@@ -11,9 +11,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import CONF_LOCAL_ID, DOMAIN
-from .coordinator import OceaDataUpdateCoordinator
+from .coordinator import OceaDataUpdateCoordinator, OceaMeterReading
 from .entity import OceaEntity, meter_device_info, meter_entity_unique_id
-from .models import OceaMeter, OceaMeterReading
+from .ocea import OceaMeter
 
 PARALLEL_UPDATES = 0
 

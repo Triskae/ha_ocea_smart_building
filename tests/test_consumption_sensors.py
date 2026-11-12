@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -15,14 +15,19 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.typing import UNDEFINED
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ocea_smart_building.api import OceaApiError, OceaAuthError
 from custom_components.ocea_smart_building.const import DOMAIN
 from custom_components.ocea_smart_building.coordinator import (
     OceaDataUpdateCoordinator,
+    _as_update_error,
     _build_meter_data,
     _current_month_payload,
 )
-from custom_components.ocea_smart_building.models import OceaMeter
+from custom_components.ocea_smart_building.ocea import (
+    OceaApiClient,
+    OceaApiError,
+    OceaAuthError,
+    OceaMeter,
+)
 from custom_components.ocea_smart_building.sensor import SENSOR_TYPES, OceaMeterSensor
 
 
@@ -93,11 +98,17 @@ def test_current_month_payload_uses_requested_calendar_date() -> None:
     }
 
 
+@pytest.mark.parametrize("error", [TimeoutError("secret-url"), RuntimeError("secret-url")])
+def test_coordinator_error_does_not_expose_exception_details(error: Exception) -> None:
+    """Network and unexpected exception details may contain credentials."""
+    assert "secret-url" not in str(_as_update_error(error))
+
+
 async def test_coordinator_uses_home_assistant_timezone(
     hass: HomeAssistant,
 ) -> None:
     """Test current-month boundaries follow Home Assistant's timezone."""
-    client = Mock()
+    client = AsyncMock(spec=OceaApiClient)
     client.get_consumptions.return_value = []
     client.get_pds.return_value = [
         {"id": "pds-cold-1", "fluide": "EauFroide"},
@@ -119,7 +130,7 @@ async def test_coordinator_uses_home_assistant_timezone(
 
 async def test_coordinator_normalizes_cetc_consumption(hass: HomeAssistant) -> None:
     """Test raw CETC consumption is normalized for the heating sensor."""
-    client = Mock()
+    client = AsyncMock(spec=OceaApiClient)
     client.get_consumptions.return_value = [
         {"fluide": "EauFroide", "valeur": "12,34"},
         {"fluide": "EauChaude", "valeur": "5,67"},
@@ -144,7 +155,7 @@ async def test_coordinator_keeps_consumption_separate_per_pds(
     hass: HomeAssistant,
 ) -> None:
     """Test two points of the same fluid produce independent meter data."""
-    client = Mock()
+    client = AsyncMock(spec=OceaApiClient)
     client.get_consumptions.return_value = [
         {"fluide": "EauFroide", "valeur": "1,14"},
     ]
@@ -234,7 +245,7 @@ async def test_coordinator_isolates_malformed_meter_response(
     hass: HomeAssistant,
 ) -> None:
     """Test malformed meter data does not discard other meter readings or totals."""
-    client = Mock()
+    client = AsyncMock(spec=OceaApiClient)
     client.get_consumptions.return_value = [
         {"fluide": "EauFroide", "valeur": "1,14"},
     ]
@@ -261,7 +272,7 @@ async def test_coordinator_discovers_meters_only_once(
     hass: HomeAssistant,
 ) -> None:
     """Test PDS metadata is cached while values continue to refresh."""
-    client = Mock()
+    client = AsyncMock(spec=OceaApiClient)
     client.get_consumptions.return_value = []
     client.get_pds.return_value = [
         {"id": "pds-cold-1", "fluide": "EauFroide"},
@@ -283,11 +294,13 @@ async def test_coordinator_discovers_meters_only_once(
     assert client.get_pds_consumption.call_count == 2
 
 
+@pytest.mark.parametrize("error", [OceaApiError("meter unavailable"), TimeoutError()])
 async def test_coordinator_keeps_other_meters_when_one_fails(
     hass: HomeAssistant,
+    error: Exception,
 ) -> None:
     """Test one PDS failure does not discard other meter data or totals."""
-    client = Mock()
+    client = AsyncMock(spec=OceaApiClient)
     client.get_consumptions.return_value = [
         {"fluide": "EauFroide", "valeur": "1,14"},
     ]
@@ -298,7 +311,7 @@ async def test_coordinator_keeps_other_meters_when_one_fails(
     client.get_appareils.return_value = []
     client.get_pds_consumption.side_effect = [
         {"consommations": [{"date": "2026-09-15", "valeur": 0.321}]},
-        OceaApiError("meter unavailable"),
+        error,
     ]
     coordinator = _coordinator(hass, client)
 
@@ -315,7 +328,7 @@ async def test_coordinator_does_not_log_meter_details(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test coordinator logs do not contain PDS or serial identifiers."""
-    client = Mock()
+    client = AsyncMock(spec=OceaApiClient)
     client.get_consumptions.return_value = []
     client.get_pds.return_value = [
         {"id": "pds-secret", "fluide": "EauFroide"},
@@ -377,7 +390,7 @@ async def test_coordinator_setup_maps_auth_error_to_reauth(
     hass: HomeAssistant,
 ) -> None:
     """Test a rejected discovery requests reauthentication."""
-    client = Mock()
+    client = AsyncMock(spec=OceaApiClient)
     client.get_pds.side_effect = OceaAuthError("rejected")
     coordinator = _coordinator(hass, client)
 

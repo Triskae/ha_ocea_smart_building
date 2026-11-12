@@ -5,21 +5,22 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import pytest
-from homeassistant.config_entries import SOURCE_RECONFIGURE
+from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_RECONFIGURE, SOURCE_USER
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult, FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ocea_smart_building.api import OceaApiError, OceaAuthError
 from custom_components.ocea_smart_building.const import (
     CONF_LOCAL_ID,
     DOMAIN,
     PASSWORD_NOT_CHANGED,
+    UA,
 )
+from custom_components.ocea_smart_building.ocea import OceaApiError, OceaAuthError
 
 OLD_EMAIL = "resident@example.com"
 OLD_PASSWORD = "stored-secret"
@@ -48,6 +49,86 @@ def config_entry(hass: HomeAssistant) -> MockConfigEntry:
     )
     entry.add_to_hass(hass)
     return entry
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_user_flow_recovers_from_auth_error(hass: HomeAssistant) -> None:
+    """A user can retry credentials and each attempt releases its own session."""
+    with (
+        patch(
+            "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
+        ) as client_class,
+        patch("custom_components.ocea_smart_building.async_setup_entry", return_value=True),
+    ):
+        client_class.return_value.validate_credentials.side_effect = [
+            OceaAuthError("invalid credentials"),
+            RESIDENT_DATA,
+        ]
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+        inputs = {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: OLD_PASSWORD}
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
+        assert result["type"] is FlowResultType.FORM
+        assert result["errors"] == {"base": "invalid_auth"}
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+        assert result["result"].unique_id == OLD_EMAIL
+        await hass.async_block_till_done()
+
+    sessions = [call.kwargs["session"] for call in client_class.call_args_list]
+    assert len(sessions) == 2 and sessions[0] is not sessions[1]
+    assert all(session.closed for session in sessions)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_user_flow_does_not_log_exception_details(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Unexpected errors may contain sensitive URLs or credentials."""
+    with patch(
+        "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
+    ) as client_class:
+        client_class.return_value.validate_credentials.side_effect = RuntimeError(
+            "sensitive-placeholder"
+        )
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: OLD_PASSWORD}
+        )
+    assert result["errors"] == {"base": "unknown"}
+    assert "sensitive-placeholder" not in caplog.text
+    assert client_class.call_args.kwargs["session"].closed
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_reauth_recovers_from_auth_error(
+    hass: HomeAssistant, config_entry: MockConfigEntry
+) -> None:
+    """Reauthentication retries safely and keeps unrelated entry data."""
+    with (
+        patch(
+            "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
+        ) as client_class,
+        patch.object(hass.config_entries, "async_schedule_reload"),
+    ):
+        client_class.return_value.validate_credentials.side_effect = [
+            OceaAuthError("invalid credentials"),
+            RESIDENT_DATA,
+        ]
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": SOURCE_REAUTH, "entry_id": config_entry.entry_id},
+            data=dict(config_entry.data),
+        )
+        inputs = {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: "replacement"}
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
+        assert result["type"] is FlowResultType.FORM
+        assert result["errors"] == {"base": "invalid_auth"}
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == "reauth_successful"
+    assert config_entry.data[CONF_PASSWORD] == "replacement"
+    assert config_entry.data["access_token"] == "hidden-token"
+    assert all(call.kwargs["session"].closed for call in client_class.call_args_list)
 
 
 async def _async_init_reconfigure(
@@ -96,7 +177,7 @@ async def test_successful_reconfiguration(
 
     with (
         patch(
-            "custom_components.ocea_smart_building.config_flow.OceaApiClient"
+            "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
         ) as client_class,
         patch.object(hass.config_entries, "async_schedule_reload") as schedule_reload,
     ):
@@ -121,7 +202,7 @@ async def test_successful_reconfiguration(
     assert config_entry.unique_id == new_email
     assert config_entry.title == "Ocea - Bob"
     schedule_reload.assert_called_once_with(config_entry.entry_id)
-    client_class.return_value.close.assert_called_once_with()
+    assert client_class.call_args.kwargs["session"].closed
 
 
 @pytest.mark.parametrize(
@@ -141,7 +222,7 @@ async def test_reconfigure_validation_error(
 ) -> None:
     """Test validation errors are mapped to translated error keys."""
     with patch(
-        "custom_components.ocea_smart_building.config_flow.OceaApiClient"
+        "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
     ) as client_class:
         client_class.return_value.validate_credentials.side_effect = exception
         result = await _async_init_reconfigure(hass, config_entry)
@@ -157,7 +238,7 @@ async def test_reconfigure_validation_error(
     assert result["step_id"] == "reconfigure"
     assert result["errors"] == {"base": expected_error}
     assert config_entry.data[CONF_PASSWORD] == OLD_PASSWORD
-    client_class.return_value.close.assert_called_once_with()
+    assert client_class.call_args.kwargs["session"].closed
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -169,7 +250,7 @@ async def test_reconfigure_preserves_secrets(
 
     with (
         patch(
-            "custom_components.ocea_smart_building.config_flow.OceaApiClient"
+            "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
         ) as client_class,
         patch.object(hass.config_entries, "async_schedule_reload"),
     ):
@@ -188,6 +269,8 @@ async def test_reconfigure_preserves_secrets(
     assert config_entry.data["access_token"] == "hidden-token"
     client_class.assert_called_once_with(
         email=new_email,
+        user_agent=UA,
+        session=ANY,
         password=OLD_PASSWORD,
         local_id=OLD_LOCAL_ID,
     )
@@ -200,7 +283,7 @@ async def test_reconfigure_without_changes_does_not_reload(
     """Test an unchanged configuration is validated but not reloaded."""
     with (
         patch(
-            "custom_components.ocea_smart_building.config_flow.OceaApiClient"
+            "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
         ) as client_class,
         patch.object(hass.config_entries, "async_schedule_reload") as schedule_reload,
     ):

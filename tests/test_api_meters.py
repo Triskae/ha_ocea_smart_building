@@ -2,103 +2,87 @@
 
 from __future__ import annotations
 
-from unittest.mock import Mock
-
+import aiohttp
 import pytest
+from aiohttp import web
 
-from custom_components.ocea_smart_building.api import OceaApiClient, OceaApiError
+from custom_components.ocea_smart_building.const import UA
+from custom_components.ocea_smart_building.ocea import OceaApiClient, OceaApiError
 
-
-def _client() -> OceaApiClient:
-    """Create an API client without performing authentication."""
-    client = OceaApiClient("resident@example.com", "password", "local-123")
-    client._access_token = "access-token"
-    return client
+pytestmark = pytest.mark.usefixtures("local_http_only")
 
 
-def test_get_pds_returns_points_for_configured_local() -> None:
-    """PDS discovery uses the configured dwelling and authenticated GET."""
-    client = _client()
-    response = Mock()
-    response.status_code = 200
-    response.json.return_value = [
-        {"id": "pds-cold-1", "fluide": "EauFroide"},
-        {"id": "pds-cold-2", "fluide": "EauFroide"},
-    ]
-    client._session.get = Mock(return_value=response)
+@pytest.mark.parametrize(
+    ("method", "path", "payload", "result"),
+    [
+        ("pds", "/api/v1/local/local-123/pds", None, [{"id": "pds-1"}]),
+        ("appareils", "/api/v1/local/appareils", {"pdsIds": ["pds-1"]}, []),
+        ("consumption", "/api/v1/local/local-123/pds/pds-1/conso", {"granularity": "Day"}, {}),
+    ],
+)
+async def test_meter_endpoints(aiohttp_server, monkeypatch, method, path, payload, result):
+    """Meter endpoints send the expected URL, token, and JSON payload."""
+    seen = []
 
-    assert client.get_pds() == response.json.return_value
+    async def handler(request):
+        seen.append((request.path, request.headers["Authorization"], request.method))
+        if payload is not None:
+            assert await request.json() == payload
+        return web.json_response(result)
 
-    client._session.get.assert_called_once()
-    request_url = client._session.get.call_args.args[0]
-    request_headers = client._session.get.call_args.kwargs["headers"]
-    assert request_url.endswith("/api/v1/local/local-123/pds")
-    assert request_headers["Authorization"] == "Bearer access-token"
-
-
-def test_get_appareils_posts_all_pds_ids() -> None:
-    """Device lookup sends the discovered PDS IDs in the JSON payload."""
-    client = _client()
-    response = Mock()
-    response.status_code = 200
-    response.json.return_value = [
-        {"pdsId": "pds-cold-1", "numeroSerie": "SERIAL-1"},
-    ]
-    client._session.post = Mock(return_value=response)
-
-    assert (
-        client.get_appareils(["pds-cold-1", "pds-cold-2"])
-        == response.json.return_value
+    app = web.Application()
+    app.router.add_route("*", path, handler)
+    server = await aiohttp_server(app)
+    monkeypatch.setattr(
+        "custom_components.ocea_smart_building.ocea.client.API_BASE", str(server.make_url("/")).rstrip("/")
     )
-
-    client._session.post.assert_called_once()
-    call = client._session.post.call_args
-    assert call.args[0].endswith("/api/v1/local/appareils")
-    assert call.kwargs["json"] == {"pdsIds": ["pds-cold-1", "pds-cold-2"]}
-    assert call.kwargs["headers"]["Authorization"] == "Bearer access-token"
-
-
-@pytest.mark.parametrize("method", ["get", "post"])
-def test_api_error_does_not_expose_response_body(method: str) -> None:
-    """API error messages must not leak response data into Home Assistant logs."""
-    client = _client()
-    response = Mock()
-    response.status_code = 500
-    response.text = "private resident data"
-    setattr(client._session, method, Mock(return_value=response))
-
-    with pytest.raises(OceaApiError, match="HTTP 500") as err:
-        if method == "get":
-            client._api_get("/api/v1/test")
+    async with aiohttp.ClientSession() as session:
+        client = OceaApiClient("resident@example.com", "placeholder", "local-123", user_agent=UA, session=session)
+        client._auth._access_token = "placeholder"
+        if method == "pds":
+            actual = await client.get_pds()
+        elif method == "appareils":
+            actual = await client.get_appareils(["pds-1"])
         else:
-            client._api_post("/api/v1/test", {})
+            actual = await client.get_pds_consumption("pds-1", payload)
+    assert actual == result
+    assert seen == [(path, "Bearer placeholder", "GET" if payload is None else "POST")]
 
-    assert "private resident data" not in str(err.value)
 
+@pytest.mark.parametrize("method", ["GET", "POST"])
+async def test_api_error_does_not_expose_response_body(aiohttp_server, monkeypatch, method):
+    """API errors never include response data in Home Assistant logs."""
+    async def handler(request):
+        return web.Response(status=500, text="private resident data")
 
-def test_get_pds_consumption_posts_period_and_granularity() -> None:
-    """Individual consumption queries target one PDS at a time."""
-    client = _client()
-    response = Mock()
-    response.status_code = 200
-    response.json.return_value = {
-        "unite": "m3",
-        "consommations": [{"date": "2026-09-01", "valeur": 0.123}],
-    }
-    client._session.post = Mock(return_value=response)
-
-    payload = {
-        "debut": "2026-09-01T00:00:00.000Z",
-        "fin": "2026-09-16T00:00:00.000Z",
-        "granularity": "Day",
-    }
-
-    assert (
-        client.get_pds_consumption("pds-cold-1", payload)
-        == response.json.return_value
+    app = web.Application()
+    app.router.add_route("*", "/test", handler)
+    server = await aiohttp_server(app)
+    monkeypatch.setattr(
+        "custom_components.ocea_smart_building.ocea.client.API_BASE", str(server.make_url("/")).rstrip("/")
     )
+    async with aiohttp.ClientSession() as session:
+        client = OceaApiClient("resident@example.com", "placeholder", user_agent=UA, session=session)
+        client._auth._access_token = "placeholder"
+        with pytest.raises(OceaApiError, match="HTTP 500") as error:
+            await client._api_request(method, "/test", {} if method == "POST" else None)
+    assert "private resident data" not in str(error.value)
 
-    call = client._session.post.call_args
-    assert call.args[0].endswith("/api/v1/local/local-123/pds/pds-cold-1/conso")
-    assert call.kwargs["json"] == payload
-    assert call.kwargs["headers"]["Authorization"] == "Bearer access-token"
+
+async def test_invalid_json_does_not_expose_response_body(aiohttp_server, monkeypatch):
+    """Malformed JSON is an API error and does not include the response body."""
+    async def handler(request):
+        return web.Response(text="private resident data")
+
+    app = web.Application()
+    app.router.add_get("/test", handler)
+    server = await aiohttp_server(app)
+    monkeypatch.setattr(
+        "custom_components.ocea_smart_building.ocea.client.API_BASE", str(server.make_url("/")).rstrip("/")
+    )
+    async with aiohttp.ClientSession() as session:
+        client = OceaApiClient("resident@example.com", "placeholder", user_agent=UA, session=session)
+        client._auth._access_token = "placeholder"
+        with pytest.raises(OceaApiError, match="Invalid API JSON response") as error:
+            await client._api_request("GET", "/test")
+    assert "private resident data" not in str(error.value)
