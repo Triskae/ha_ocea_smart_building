@@ -66,6 +66,7 @@ rules:
     comment: The integration uses resident-account data rather than targeting specific devices.
   docs-supported-functions: done
   docs-troubleshooting: todo
+  docs-use-cases: todo
   dynamic-devices: todo
   entity-category:
     status: exempt

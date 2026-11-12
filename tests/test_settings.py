@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from types import ModuleType
 
+import yaml
+
 INTEGRATION_PATH = (
     Path(__file__).parents[1] / "custom_components" / "ocea_smart_building"
 )
@@ -100,3 +102,24 @@ def test_ci_workflow_validates_main_and_pull_requests() -> None:
     assert "permissions:\n  contents: read" in workflow
     _assert_ci_quality_gate(workflow)
     assert "gh release create" not in workflow
+
+
+def test_ci_runs_quality_scale_tests_as_a_blocking_part_of_pytest() -> None:
+    """Ensure the complete pytest suite runs once and cannot be ignored."""
+    workflow = yaml.load(CI_WORKFLOW_PATH.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    job = workflow["jobs"]["validate"]
+    assert job.get("continue-on-error", "false") == "false"
+    pytest_steps = [
+        step for step in job["steps"] if "python -m pytest" in step.get("run", "")
+    ]
+    assert len(pytest_steps) == 1
+    step = pytest_steps[0]
+    command = step["run"].replace("${{ runner.temp }}", "/tmp").split()
+    pytest_args = command[command.index("pytest") + 1:]
+    assert pytest_args[0] == "-q"
+    assert all(
+        argument.startswith(("--cov=", "--cov-report="))
+        for argument in pytest_args[1:]
+    )
+    assert step.get("continue-on-error", "false") == "false"
+    assert not step.get("if")
