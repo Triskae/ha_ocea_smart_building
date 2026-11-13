@@ -220,6 +220,33 @@ async def test_get_consumptions_targets_configured_dwelling(aiohttp_server, monk
     assert state["requests"][0][1] == "/api/v1/local/local-123/dashboard/consos"
 
 
+async def test_dwelling_access_and_details(aiohttp_server, monkeypatch):
+    state = {"api_response": []}
+    await _server(aiohttp_server, monkeypatch, state)
+    async with aiohttp.ClientSession() as session:
+        client = _client(session)
+        client._auth._access_token = "token-placeholder"
+        await client.check_dwelling_access("other-local")
+        state["api_response"] = {"local": {}}
+        assert await client.get_dwelling_details("other-local") == {"local": {}}
+    assert [request[1] for request in state["requests"]] == [
+        "/api/v1/local/other-local/dashboard/consos",
+        "/api/v1/local/other-local",
+    ]
+
+
+@pytest.mark.parametrize("status", [403, 500])
+async def test_api_error_exposes_http_status(aiohttp_server, monkeypatch, status):
+    state = {"api_statuses": [status]}
+    await _server(aiohttp_server, monkeypatch, state)
+    async with aiohttp.ClientSession() as session:
+        client = _client(session)
+        client._auth._access_token = "token-placeholder"
+        with pytest.raises(OceaApiError) as error:
+            await client.check_dwelling_access("other-local")
+    assert error.value.status == status
+
+
 async def test_first_api_call_authenticates_when_token_is_missing(aiohttp_server, monkeypatch):
     state = {}
     await _server(aiohttp_server, monkeypatch, state)

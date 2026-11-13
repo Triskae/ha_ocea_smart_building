@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from json import JSONDecodeError
 from typing import cast
+from urllib.parse import quote
 
 from aiohttp import ClientSession, ClientTimeout
 
@@ -68,7 +69,7 @@ class OceaApiClient:
                 _LOGGER.debug("Token expired, refreshing")
                 await self._auth.refresh_access_token()
                 continue
-            raise OceaApiError(f"API error: HTTP {status}")
+            raise OceaApiError(f"API error: HTTP {status}", status=status)
         raise OceaApiError("API authentication retry exhausted")
 
     async def get_resident(self) -> dict[str, object]:
@@ -82,6 +83,18 @@ class OceaApiClient:
             "GET", f"/api/v1/local/{self._local_id}/dashboard/consos"
         )
         return _list_response(result)
+
+    async def check_dwelling_access(self, local_id: str) -> None:
+        """Check that the account can access consumption data for a dwelling."""
+        path_id = quote(local_id, safe="")
+        _list_response(
+            await self._api_request("GET", f"/api/v1/local/{path_id}/dashboard/consos")
+        )
+
+    async def get_dwelling_details(self, local_id: str) -> dict[str, object]:
+        """Get the details of an accessible dwelling."""
+        path_id = quote(local_id, safe="")
+        return _object_response(await self._api_request("GET", f"/api/v1/local/{path_id}"))
 
     async def get_pds(self) -> list[dict[str, object]]:
         """Get the configured dwelling's points of measurement."""

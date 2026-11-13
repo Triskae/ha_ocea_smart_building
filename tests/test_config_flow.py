@@ -8,12 +8,13 @@ from typing import Any
 from unittest.mock import ANY, patch
 
 import pytest
+import voluptuous as vol
 from aiohttp import ClientError
 from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_RECONFIGURE, SOURCE_USER
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult, FlowResultType
-from homeassistant.helpers.selector import TextSelector
+from homeassistant.helpers.selector import SelectSelector, TextSelector
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ocea_smart_building.const import (
@@ -367,7 +368,7 @@ async def test_flows_use_validated_dwelling_when_name_missing(
         patch.object(hass.config_entries, "async_schedule_reload"),
     ):
         client_class.return_value.validate_credentials.return_value = {
-            "occupations": [{"logementId": "new-dwelling"}]
+            "occupations": [{"logementId": OLD_LOCAL_ID}]
         }
         result = await hass.config_entries.flow.async_init(DOMAIN, context=context)
         result = await hass.config_entries.flow.async_configure(
@@ -380,13 +381,13 @@ async def test_flows_use_validated_dwelling_when_name_missing(
         else:
             assert result["type"] is FlowResultType.ABORT
             assert result["reason"] == f"{source}_successful"
-        assert entry.data[CONF_LOCAL_ID] == "new-dwelling"
-        assert entry.title == "Ocea - new-dwelling"
+        assert entry.data[CONF_LOCAL_ID] == OLD_LOCAL_ID
+        assert entry.title == f"Ocea - {OLD_LOCAL_ID}"
         await hass.async_block_till_done()
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_reauth_updates_validated_dwelling_and_title(
+async def test_reauth_preserves_dwelling_and_updates_title(
     hass: HomeAssistant, config_entry: MockConfigEntry
 ) -> None:
     """Reauthentication uses the newly validated resident data."""
@@ -398,7 +399,7 @@ async def test_reauth_updates_validated_dwelling_and_title(
     ):
         client_class.return_value.validate_credentials.return_value = {
             "resident": {"prenom": "Bob"},
-            "occupations": [{"logementId": "new-dwelling"}],
+            "occupations": [{"logementId": "new-dwelling"}, {"logementId": OLD_LOCAL_ID}],
         }
         result = await _async_init_reauth(hass, config_entry)
         result = await hass.config_entries.flow.async_configure(
@@ -406,7 +407,7 @@ async def test_reauth_updates_validated_dwelling_and_title(
         )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
-    assert config_entry.data[CONF_LOCAL_ID] == "new-dwelling"
+    assert config_entry.data[CONF_LOCAL_ID] == OLD_LOCAL_ID
     assert config_entry.data["access_token"] == "hidden-token"
     assert config_entry.title == "Ocea - Bob"
 
@@ -439,7 +440,7 @@ async def test_successful_reconfiguration(
     new_password = "new-secret"
     resident_data = {
         "resident": {"prenom": "Bob"},
-        "occupations": [{"logementId": "local-456"}],
+        "occupations": [{"logementId": "local-456"}, {"logementId": OLD_LOCAL_ID}],
     }
 
     with (
@@ -463,7 +464,7 @@ async def test_successful_reconfiguration(
     assert config_entry.data == {
         CONF_EMAIL: new_email,
         CONF_PASSWORD: new_password,
-        CONF_LOCAL_ID: "local-456",
+        CONF_LOCAL_ID: OLD_LOCAL_ID,
         "access_token": "hidden-token",
     }
     assert config_entry.unique_id == new_email
@@ -653,3 +654,251 @@ async def test_flow_uses_email_and_password_selectors(
     assert fields[CONF_EMAIL].config["type"] == "email"
     assert isinstance(fields[CONF_PASSWORD], TextSelector)
     assert fields[CONF_PASSWORD].config["type"] == "password"
+
+
+@pytest.mark.parametrize(
+    ("language", "no_address"), [("en", "Address unavailable"), ("fr", "Adresse indisponible")]
+)
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_user_selects_accessible_dwelling(
+    hass: HomeAssistant, language: str, no_address: str
+) -> None:
+    """Multiple accessible dwellings require a valid explicit choice."""
+    hass.config.language = language
+    data = {
+        "resident": {"prenom": "Synthetic"},
+        "occupations": [
+            {"logementId": "first", "dateDebut": "2020-01-01T00:00:00Z", "dateFin": None},
+            {"logementId": "second"},
+            {"logementId": "first"},
+            {"logementId": "forbidden"},
+        ],
+    }
+
+    async def check_access(local_id: str) -> None:
+        if local_id == "forbidden":
+            raise OceaApiError("forbidden", status=403)
+
+    with (
+        patch(
+            "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
+        ) as client_class,
+        patch("custom_components.ocea_smart_building.async_setup_entry", return_value=True),
+    ):
+        client = client_class.return_value
+        client.validate_credentials.return_value = data
+        client.check_dwelling_access.side_effect = check_access
+        client.get_dwelling_details.side_effect = [
+            {"local": {"adresse": {"ville": "Example"}}},
+            {"local": {}},
+        ]
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: OLD_PASSWORD}
+        )
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "dwelling"
+        assert client_class.call_args.kwargs["session"].closed
+        schema = result["data_schema"]
+        field, selector = next(iter(schema.schema.items()))
+        assert isinstance(selector, SelectSelector)
+        assert field.default is vol.UNDEFINED
+        options = selector.config["options"]
+        assert [option["value"] for option in options] == ["first", "second"]
+        assert "Example" in options[0]["label"]
+        assert no_address in options[1]["label"]
+        assert options[0]["label"] != options[1]["label"]
+        with pytest.raises(vol.Invalid):
+            schema({CONF_LOCAL_ID: "forbidden"})
+        with pytest.raises(vol.Invalid):
+            await hass.config_entries.flow.async_configure(
+                result["flow_id"], {CONF_LOCAL_ID: "forbidden"}
+            )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_LOCAL_ID: "second"}
+        )
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+        assert result["result"].data[CONF_LOCAL_ID] == "second"
+        await hass.async_block_till_done()
+        assert client.check_dwelling_access.await_count == 3
+
+
+@pytest.mark.parametrize("source", [SOURCE_REAUTH, SOURCE_RECONFIGURE])
+@pytest.mark.parametrize("unavailable", ["missing", "forbidden"])
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_existing_dwelling_cannot_be_switched_implicitly(
+    hass: HomeAssistant, config_entry: MockConfigEntry, source: str, unavailable: str
+) -> None:
+    with patch(
+        "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
+    ) as client_class:
+        client = client_class.return_value
+        occupations = [{"logementId": "another"}]
+        if unavailable == "forbidden":
+            occupations.append({"logementId": OLD_LOCAL_ID})
+            client.check_dwelling_access.side_effect = OceaApiError("forbidden", status=403)
+        client.validate_credentials.return_value = {"occupations": occupations}
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": source, "entry_id": config_entry.entry_id}
+        )
+        inputs = {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: "replacement"}
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
+        assert result["type"] is FlowResultType.FORM
+        assert result["errors"] == {"base": "no_dwelling_access"}
+        assert config_entry.data[CONF_LOCAL_ID] == OLD_LOCAL_ID
+        assert config_entry.data[CONF_PASSWORD] == OLD_PASSWORD
+        client.validate_credentials.return_value = RESIDENT_DATA
+        client.check_dwelling_access.side_effect = None
+        with patch.object(hass.config_entries, "async_schedule_reload"):
+            result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == f"{source}_successful"
+
+
+@pytest.mark.parametrize(
+    ("failure", "error"),
+    [
+        (OceaApiError("forbidden", status=403), "no_dwelling_access"),
+        (OceaApiError("unauthorized", status=401), "invalid_auth"),
+        (OceaApiError("failure", status=500), "cannot_connect"),
+        (TimeoutError(), "cannot_connect"),
+    ],
+)
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_user_access_errors_can_be_retried(
+    hass: HomeAssistant, failure: Exception, error: str
+) -> None:
+    with (
+        patch(
+            "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
+        ) as client_class,
+        patch("custom_components.ocea_smart_building.async_setup_entry", return_value=True),
+    ):
+        client = client_class.return_value
+        client.validate_credentials.return_value = RESIDENT_DATA
+        client.check_dwelling_access.side_effect = [failure, None]
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+        inputs = {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: OLD_PASSWORD}
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
+        assert result["errors"] == {"base": error}
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+        await hass.async_block_till_done()
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_detail_forbidden_leaves_single_valid_dwelling(hass: HomeAssistant) -> None:
+    with (
+        patch(
+            "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
+        ) as client_class,
+        patch("custom_components.ocea_smart_building.async_setup_entry", return_value=True),
+    ):
+        client = client_class.return_value
+        client.validate_credentials.return_value = {
+            "occupations": [{"logementId": "first"}, {"logementId": "second"}]
+        }
+        client.get_dwelling_details.side_effect = [
+            OceaApiError("forbidden", status=403), {"local": {}}
+        ]
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: OLD_PASSWORD}
+        )
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+        assert result["result"].data[CONF_LOCAL_ID] == "second"
+        await hass.async_block_till_done()
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [
+        (OceaApiError("unavailable", status=500), "cannot_connect"),
+        (OceaApiError("unauthorized", status=401), "invalid_auth"),
+        (OceaApiError("forbidden", status=403), "no_dwelling_access"),
+    ],
+)
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_dwelling_detail_errors_allow_retry(
+    hass: HomeAssistant, failure: OceaApiError, expected: str
+) -> None:
+    with (
+        patch(
+            "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
+        ) as client_class,
+        patch("custom_components.ocea_smart_building.async_setup_entry", return_value=True),
+    ):
+        client = client_class.return_value
+        client.validate_credentials.side_effect = [
+            {"occupations": [{"logementId": "first"}, {"logementId": "second"}]},
+            RESIDENT_DATA,
+        ]
+        client.get_dwelling_details.side_effect = failure
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+        inputs = {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: OLD_PASSWORD}
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
+        assert result["errors"] == {"base": expected}
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+        await hass.async_block_till_done()
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_abandon_dwelling_selection_discards_flow(hass: HomeAssistant) -> None:
+    with patch(
+        "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
+    ) as client_class:
+        client = client_class.return_value
+        client.validate_credentials.return_value = {
+            "occupations": [{"logementId": "first"}, {"logementId": "second"}]
+        }
+        client.get_dwelling_details.return_value = {"local": {}}
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: OLD_PASSWORD}
+        )
+        assert result["step_id"] == "dwelling"
+        selector = next(iter(result["data_schema"].schema.values()))
+        labels = [option["label"] for option in selector.config["options"]]
+        assert len(set(labels)) == 2
+        hass.config_entries.flow.async_abort(result["flow_id"])
+        assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+        assert client_class.call_args.kwargs["session"].closed
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_selector_translation_failure_can_be_retried(hass: HomeAssistant) -> None:
+    with (
+        patch(
+            "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
+        ) as client_class,
+        patch(
+            "custom_components.ocea_smart_building.config_flow.async_get_translations",
+            side_effect=RuntimeError("unavailable"),
+        ),
+        patch("custom_components.ocea_smart_building.async_setup_entry", return_value=True),
+    ):
+        client = client_class.return_value
+        client.validate_credentials.side_effect = [
+            {"occupations": [{"logementId": "first"}, {"logementId": "second"}]},
+            RESIDENT_DATA,
+        ]
+        client.get_dwelling_details.return_value = {"local": {}}
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+        inputs = {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: OLD_PASSWORD}
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
+        assert result["errors"] == {"base": "unknown"}
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+        await hass.async_block_till_done()
+
+
+@pytest.mark.parametrize("filename", ["strings.json", "translations/en.json", "translations/fr.json"])
+def test_dwelling_translations_are_complete(filename: str) -> None:
+    path = Path(__file__).parents[1] / "custom_components" / DOMAIN / filename
+    translations = json.loads(path.read_text(encoding="utf-8"))
+    assert set(translations["config"]["step"]["dwelling"]["data"]) == {CONF_LOCAL_ID}
+    assert "no_dwelling_access" in translations["config"]["error"]
+    assert set(translations["selector"]["dwelling"]["options"]) == {
+        "no_address", "current", "future", "ended", "unknown"
+    }

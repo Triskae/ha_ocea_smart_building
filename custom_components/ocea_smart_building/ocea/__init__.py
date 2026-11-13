@@ -2,6 +2,23 @@
 
 from .client import OceaApiClient
 from .exceptions import OceaApiError, OceaAuthError
-from .models import OceaMeter, OceaPds
+from .models import (
+    OccupationStatus,
+    OceaDwelling,
+    OceaMeter,
+    OceaPds,
+    OceaResident,
+    dwelling_address,
+)
 
-__all__ = ["OceaApiClient", "OceaApiError", "OceaAuthError", "OceaMeter", "OceaPds"]
+__all__ = [
+    "OccupationStatus",
+    "OceaApiClient",
+    "OceaApiError",
+    "OceaAuthError",
+    "OceaDwelling",
+    "OceaMeter",
+    "OceaPds",
+    "OceaResident",
+    "dwelling_address",
+]

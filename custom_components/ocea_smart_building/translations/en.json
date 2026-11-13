@@ -13,6 +13,13 @@
           "password": "Password for your Ocea resident account."
         }
       },
+      "dwelling": {
+        "title": "Choose a dwelling",
+        "description": "Choose the dwelling to monitor. Occupation status is indicative.",
+        "data": {
+          "local_id": "Dwelling"
+        }
+      },
       "reauth_confirm": {
         "title": "Re-authentication",
         "description": "Your credentials have expired. Please reconnect.",
@@ -42,6 +49,7 @@
       "invalid_auth": "Invalid credentials",
       "cannot_connect": "Cannot connect to Ocea server",
       "no_occupation": "No dwelling found for this account",
+      "no_dwelling_access": "The requested dwelling could not be found or accessed with this account.",
       "unknown": "Unexpected error"
     },
     "abort": {
@@ -49,6 +57,17 @@
       "unique_id_mismatch": "Use the configured Ocea account to re-authenticate.",
       "reconfigure_successful": "Reconfiguration was successful",
       "reauth_successful": "Re-authentication was successful"
+    }
+  },
+  "selector": {
+    "dwelling": {
+      "options": {
+        "no_address": "Address unavailable",
+        "current": "Current occupation",
+        "future": "Upcoming occupation",
+        "ended": "Ended occupation",
+        "unknown": "Unknown occupation status"
+      }
     }
   },
   "entity": {

@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from custom_components.ocea_smart_building.coordinator import OceaMeterReading
 from custom_components.ocea_smart_building.entity import meter_device_info
 from custom_components.ocea_smart_building.ocea import OceaApiError, OceaMeter, OceaPds
+from custom_components.ocea_smart_building.ocea.models import (
+    OccupationStatus,
+    OceaOccupation,
+    OceaResident,
+    dwelling_address,
+)
 
 
 def test_pds_model_maps_ocea_response() -> None:
@@ -128,3 +136,78 @@ def test_invalid_device_fields_are_explicit_errors(field: str, value: object) ->
 def test_invalid_pds_factor_is_an_explicit_error() -> None:
     with pytest.raises(OceaApiError, match="Invalid meter field: fce"):
         OceaPds.from_api({"id": "pds-1", "fce": True})
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "expected"),
+    [
+        ("2025-01-01T00:00:00Z", None, OccupationStatus.CURRENT),
+        ("2027-01-01T01:00:00+01:00", None, OccupationStatus.FUTURE),
+        ("2024-01-01T00:00:00Z", "2025-01-01T00:00:00Z", OccupationStatus.ENDED),
+        ("2024-01-01T00:00:00Z", "2027-01-01T00:00:00Z", OccupationStatus.CURRENT),
+        ("2026-01-01T00:00:00Z", None, OccupationStatus.UNKNOWN),
+        ("2024-01-01T00:00:00Z", "2026-01-01T00:00:00Z", OccupationStatus.UNKNOWN),
+        ("2027-01-01T00:00:00Z", "2025-01-01T00:00:00Z", OccupationStatus.UNKNOWN),
+        ("2024-01-01", None, OccupationStatus.UNKNOWN),
+        ("not-a-date", None, OccupationStatus.UNKNOWN),
+        ("2024-01-01T00:00:00Z", "bad", OccupationStatus.UNKNOWN),
+        (None, None, OccupationStatus.UNKNOWN),
+    ],
+)
+def test_occupation_status(start: object, end: object, expected: OccupationStatus) -> None:
+    occupation = OceaOccupation.from_api({"dateDebut": start, "dateFin": end})
+    assert occupation.status(datetime(2026, 1, 1, tzinfo=timezone.utc)) == expected
+
+
+def test_occupation_missing_end_is_unknown() -> None:
+    occupation = OceaOccupation.from_api({"dateDebut": "2024-01-01T00:00:00Z"})
+    assert occupation.status(datetime(2026, 1, 1, tzinfo=timezone.utc)) is OccupationStatus.UNKNOWN
+
+
+def test_resident_deduplicates_and_does_not_infer_conflicting_statuses() -> None:
+    resident = OceaResident.from_api({
+        "resident": {"prenom": "Synthetic"},
+        "occupations": [
+            {"logementId": "one", "dateDebut": "2024-01-01T00:00:00Z", "dateFin": None},
+            {"logementId": "one", "dateDebut": "2027-01-01T00:00:00Z", "dateFin": None},
+        ],
+    })
+    assert len(resident.dwellings) == 1
+    assert resident.dwellings[0].status(datetime(2026, 1, 1, tzinfo=timezone.utc)) is OccupationStatus.UNKNOWN
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"resident": []},
+        {"resident": {"prenom": 12}},
+        {"occupations": {}},
+        {"occupations": [None]},
+        {"occupations": [{"logementId": ""}]},
+        {"occupations": [{"logementId": 2}]},
+    ],
+)
+def test_invalid_resident_fields_raise(data: dict[str, object]) -> None:
+    with pytest.raises(OceaApiError):
+        OceaResident.from_api(data)
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({"local": {}}, None),
+        ({"local": {"adresse": {}}}, None),
+        ({"local": {"adresse": {"numeroRue": 7, "ville": "Example", "codePostal": "12345"}}},
+         "7, 12345, Example"),
+    ],
+)
+def test_dwelling_address(data: dict[str, object], expected: str | None) -> None:
+    assert dwelling_address(data) == expected
+
+
+@pytest.mark.parametrize(
+    "data", [{}, {"local": {"adresse": []}}, {"local": {"adresse": {"ville": []}}}]
+)
+def test_invalid_dwelling_details_raise(data: dict[str, object]) -> None:
+    with pytest.raises(OceaApiError):
+        dwelling_address(data)
