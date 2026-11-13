@@ -90,7 +90,7 @@ GOLD_RULES = {
 }
 PLATINUM_RULES = {"async-dependency", "inject-websession", "strict-typing"}
 ALL_RULES = BRONZE_RULES | SILVER_RULES | GOLD_RULES | PLATINUM_RULES
-PROTECTED_RULES = {"common-modules", "parallel-updates"}
+PROTECTED_RULES = {"brands", "common-modules", "parallel-updates"}
 
 
 def _rules() -> dict[str, Any]:
