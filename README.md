@@ -44,7 +44,10 @@ Settings → Devices & Services → Add Integration → "Ocea Smart Building"
 - **Email**: your Ocea resident portal email
 - **Password**: your Ocea password
 
-Your dwelling is automatically detected from your Ocea account.
+If your account has one accessible dwelling, it is selected automatically. If
+several are accessible, choose the dwelling to monitor. The displayed occupation
+status is indicative, based on the dates supplied by Ocea, and does not
+determine access.
 
 ### Water meters
 
@@ -111,6 +114,17 @@ Open Settings → Devices & Services → Ocea Smart Building, then select the na
 - The stored password is never displayed. Leave the password field unchanged to keep it, or enter a new password to replace it.
 - Credentials are validated with Ocea before changes are saved.
 - Home Assistant reloads the integration only when the validated configuration has actually changed.
+
+If Home Assistant requests reauthentication, sign in with the same Ocea
+account. To switch accounts, use **Reconfigure** instead. A successful
+reauthentication also refreshes the entry name from the account. Both
+reauthentication and reconfiguration retain the selected dwelling. If it is
+missing or no longer accessible, restore access with Ocea and retry.
+
+To select a different dwelling, remove the integration entry and install it
+again. Removing it also removes its devices and entities: automations, dashboards
+and other references may need updating, and historical data may no longer be
+associated with the new entities. Review these dependencies before removal.
 
 ## Energy dashboard
 

@@ -7,6 +7,17 @@
         "data": {
           "email": "Email",
           "password": "Mot de passe"
+        },
+        "data_description": {
+          "email": "Adresse email utilisée pour votre espace résident Ocea.",
+          "password": "Mot de passe de votre espace résident Ocea."
+        }
+      },
+      "dwelling": {
+        "title": "Choisir un logement",
+        "description": "Choisissez le logement à suivre. Le statut d'occupation est indicatif.",
+        "data": {
+          "local_id": "Logement"
         }
       },
       "reauth_confirm": {
@@ -15,6 +26,10 @@
         "data": {
           "email": "Email",
           "password": "Mot de passe"
+        },
+        "data_description": {
+          "email": "Adresse email du compte Ocea déjà configuré.",
+          "password": "Mot de passe actuel de votre espace résident Ocea."
         }
       },
       "reconfigure": {
@@ -34,11 +49,25 @@
       "invalid_auth": "Identifiants invalides",
       "cannot_connect": "Impossible de se connecter au serveur Ocea",
       "no_occupation": "Aucun logement trouvé pour ce compte",
+      "no_dwelling_access": "Le logement recherché est introuvable ou inaccessible avec ce compte.",
       "unknown": "Erreur inattendue"
     },
     "abort": {
       "already_configured": "Ce compte est déjà configuré",
-      "reconfigure_successful": "La reconfiguration a réussi"
+      "unique_id_mismatch": "Utilisez le compte Ocea déjà configuré pour la ré-authentification.",
+      "reconfigure_successful": "La reconfiguration a réussi",
+      "reauth_successful": "La ré-authentification a réussi"
+    }
+  },
+  "selector": {
+    "dwelling": {
+      "options": {
+        "no_address": "Adresse indisponible",
+        "current": "Occupation en cours",
+        "future": "Occupation à venir",
+        "ended": "Occupation terminée",
+        "unknown": "Statut d'occupation inconnu"
+      }
     }
   },
   "entity": {
