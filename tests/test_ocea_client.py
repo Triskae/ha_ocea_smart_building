@@ -12,9 +12,11 @@ from aiohttp import web
 
 from custom_components.ocea_smart_building.const import UA
 from custom_components.ocea_smart_building.ocea import (
+    OceaAddress,
     OceaApiClient,
     OceaApiError,
     OceaAuthError,
+    OceaDwellingDetails,
     OceaResident,
 )
 
@@ -231,12 +233,40 @@ async def test_dwelling_access_and_details(aiohttp_server, monkeypatch):
         client = _client(session)
         client._auth._access_token = "token-placeholder"
         await client.check_dwelling_access("other-local")
-        state["api_response"] = {"local": {}}
-        assert await client.get_dwelling_details("other-local") == {"local": {}}
+        state["api_response"] = {"local": {"adresse": {
+            "numeroRue": "9",
+            "complement": "Unit B",
+            "ville": "Example",
+            "codePostal": "12345",
+            "pays": "Country",
+        }}}
+        assert await client.get_dwelling_details("other-local") == OceaDwellingDetails(
+            address=OceaAddress(
+                street_number="9",
+                complement="Unit B",
+                postal_code="12345",
+                city="Example",
+                country="Country",
+            )
+        )
     assert [request[1] for request in state["requests"]] == [
         "/api/v1/local/other-local/dashboard/consos",
         "/api/v1/local/other-local",
     ]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [[], {}, {"local": {"adresse": []}}, {"local": {"adresse": {"ville": []}}}],
+)
+async def test_invalid_dwelling_details_response(aiohttp_server, monkeypatch, response):
+    state = {"api_response": response}
+    await _server(aiohttp_server, monkeypatch, state)
+    async with aiohttp.ClientSession() as session:
+        client = _client(session)
+        client._auth._access_token = "token-placeholder"
+        with pytest.raises(OceaApiError):
+            await client.get_dwelling_details("other-local")
 
 
 @pytest.mark.parametrize("status", [403, 500])

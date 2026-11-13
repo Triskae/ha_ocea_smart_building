@@ -11,9 +11,10 @@ from custom_components.ocea_smart_building.entity import meter_device_info
 from custom_components.ocea_smart_building.ocea import OceaApiError, OceaMeter, OceaPds
 from custom_components.ocea_smart_building.ocea.models import (
     OccupationStatus,
+    OceaAddress,
+    OceaDwellingDetails,
     OceaOccupation,
     OceaResident,
-    dwelling_address,
 )
 
 
@@ -196,13 +197,27 @@ def test_invalid_resident_fields_raise(data: dict[str, object]) -> None:
     ("data", "expected"),
     [
         ({"local": {}}, None),
-        ({"local": {"adresse": {}}}, None),
-        ({"local": {"adresse": {"numeroRue": 7, "ville": "Example", "codePostal": "12345"}}},
-         "7, 12345, Example"),
+        ({"local": {"adresse": {}}}, OceaAddress()),
+        (
+            {"local": {"adresse": {
+                "numeroRue": 7,
+                "complement": " Unit A ",
+                "ville": "Example",
+                "codePostal": "12345",
+                "pays": "Country",
+            }}},
+            OceaAddress(
+                street_number="7",
+                complement=" Unit A ",
+                postal_code="12345",
+                city="Example",
+                country="Country",
+            ),
+        ),
     ],
 )
-def test_dwelling_address(data: dict[str, object], expected: str | None) -> None:
-    assert dwelling_address(data) == expected
+def test_dwelling_address(data: dict[str, object], expected: OceaAddress | None) -> None:
+    assert OceaDwellingDetails.from_api(data) == OceaDwellingDetails(address=expected)
 
 
 @pytest.mark.parametrize(
@@ -210,4 +225,4 @@ def test_dwelling_address(data: dict[str, object], expected: str | None) -> None
 )
 def test_invalid_dwelling_details_raise(data: dict[str, object]) -> None:
     with pytest.raises(OceaApiError):
-        dwelling_address(data)
+        OceaDwellingDetails.from_api(data)

@@ -24,8 +24,10 @@ from custom_components.ocea_smart_building.const import (
     UA,
 )
 from custom_components.ocea_smart_building.ocea import (
+    OceaAddress,
     OceaApiError,
     OceaAuthError,
+    OceaDwellingDetails,
     OceaResident,
 )
 
@@ -700,8 +702,11 @@ async def test_user_selects_accessible_dwelling(
         client.get_resident.return_value = OceaResident.from_api(data)
         client.check_dwelling_access.side_effect = check_access
         client.get_dwelling_details.side_effect = [
-            {"local": {"adresse": {"ville": "Example"}}},
-            {"local": {}},
+            OceaDwellingDetails(address=OceaAddress(
+                street_number=" 7 ", complement=" Unit A ", postal_code="12345",
+                city="Example", country="Country",
+            )),
+            OceaDwellingDetails(address=OceaAddress()),
         ]
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
         result = await hass.config_entries.flow.async_configure(
@@ -716,7 +721,7 @@ async def test_user_selects_accessible_dwelling(
         assert field.default is vol.UNDEFINED
         options = selector.config["options"]
         assert [option["value"] for option in options] == ["first", "second"]
-        assert "Example" in options[0]["label"]
+        assert "7, Unit A, 12345, Example, Country" in options[0]["label"]
         assert no_address in options[1]["label"]
         assert options[0]["label"] != options[1]["label"]
         with pytest.raises(vol.Invalid):
@@ -885,7 +890,7 @@ async def test_detail_forbidden_leaves_single_valid_dwelling(hass: HomeAssistant
             "occupations": [{"logementId": "first"}, {"logementId": "second"}]
         })
         client.get_dwelling_details.side_effect = [
-            OceaApiError("forbidden", status=403), {"local": {}}
+            OceaApiError("forbidden", status=403), OceaDwellingDetails(address=None)
         ]
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
         result = await hass.config_entries.flow.async_configure(
@@ -940,7 +945,7 @@ async def test_abandon_dwelling_selection_discards_flow(hass: HomeAssistant) -> 
         client.get_resident.return_value = OceaResident.from_api({
             "occupations": [{"logementId": "first"}, {"logementId": "second"}]
         })
-        client.get_dwelling_details.return_value = {"local": {}}
+        client.get_dwelling_details.return_value = OceaDwellingDetails(address=None)
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: OLD_PASSWORD}
@@ -973,7 +978,7 @@ async def test_selector_translation_failure_can_be_retried(hass: HomeAssistant) 
             ),
             RESIDENT,
         ]
-        client.get_dwelling_details.return_value = {"local": {}}
+        client.get_dwelling_details.return_value = OceaDwellingDetails(address=None)
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
         inputs = {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: OLD_PASSWORD}
         result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)

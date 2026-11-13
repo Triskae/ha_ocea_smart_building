@@ -113,24 +113,52 @@ class OceaResident:
         )
 
 
-def dwelling_address(data: Mapping[str, object]) -> str | None:
-    """Extract the available address components from dwelling details."""
-    local = data.get("local")
-    if not isinstance(local, dict):
-        raise OceaApiError("Invalid dwelling details")
-    address = local.get("adresse")
-    if address is None:
-        return None
-    if not isinstance(address, dict):
-        raise OceaApiError("Invalid dwelling address")
-    parts: list[str] = []
-    for key in ("numeroRue", "complement", "codePostal", "ville", "pays"):
-        value: object = address.get(key)
-        if value is not None and not isinstance(value, (str, int)):
-            raise OceaApiError("Invalid dwelling address field")
-        if value is not None and str(value).strip():
-            parts.append(str(value).strip())
-    return ", ".join(parts) or None
+@dataclass(frozen=True, slots=True)
+class OceaAddress:
+    """Structured address returned by the dwelling endpoint."""
+
+    street_number: str | None = None
+    complement: str | None = None
+    postal_code: str | None = None
+    city: str | None = None
+    country: str | None = None
+
+    @classmethod
+    def from_api(cls, data: Mapping[str, object]) -> OceaAddress:
+        """Validate and retain the available address components."""
+        def field(key: str) -> str | None:
+            value = data.get(key)
+            if value is not None and not isinstance(value, (str, int)):
+                raise OceaApiError("Invalid dwelling address field")
+            return str(value) if value is not None else None
+
+        return cls(
+            street_number=field("numeroRue"),
+            complement=field("complement"),
+            postal_code=field("codePostal"),
+            city=field("ville"),
+            country=field("pays"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class OceaDwellingDetails:
+    """Validated details used to distinguish an accessible dwelling."""
+
+    address: OceaAddress | None
+
+    @classmethod
+    def from_api(cls, data: Mapping[str, object]) -> OceaDwellingDetails:
+        """Parse the available address from dwelling details."""
+        local = data.get("local")
+        if not isinstance(local, dict):
+            raise OceaApiError("Invalid dwelling details")
+        address = local.get("adresse")
+        if address is None:
+            return cls(address=None)
+        if not isinstance(address, dict):
+            raise OceaApiError("Invalid dwelling address")
+        return cls(address=OceaAddress.from_api(cast(dict[str, object], address)))
 
 
 def _optional_string(data: Mapping[str, object], key: str) -> str | None:

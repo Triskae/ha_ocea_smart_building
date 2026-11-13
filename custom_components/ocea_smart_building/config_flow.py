@@ -23,14 +23,28 @@ from homeassistant.helpers.translation import async_get_translations
 
 from .const import CONF_LOCAL_ID, DOMAIN, PASSWORD_NOT_CHANGED, UA
 from .ocea import (
+    OceaAddress,
     OceaApiClient,
     OceaApiError,
     OceaAuthError,
     OceaDwelling,
-    dwelling_address,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _format_address(address: OceaAddress | None) -> str | None:
+    """Format the available address fields for the dwelling selector."""
+    if address is None:
+        return None
+    parts = (
+        address.street_number,
+        address.complement,
+        address.postal_code,
+        address.city,
+        address.country,
+    )
+    return ", ".join(part.strip() for part in parts if part and part.strip()) or None
 
 
 class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -110,7 +124,7 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                                 if err.status != 403:
                                     raise
                             else:
-                                options.append((dwelling, dwelling_address(details)))
+                                options.append((dwelling, _format_address(details.address)))
                         if not options:
                             errors["base"] = "no_dwelling_access"
                         elif len(options) > 1:

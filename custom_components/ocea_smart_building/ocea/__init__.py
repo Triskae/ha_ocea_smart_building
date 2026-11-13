@@ -4,21 +4,23 @@ from .client import OceaApiClient
 from .exceptions import OceaApiError, OceaAuthError
 from .models import (
     OccupationStatus,
+    OceaAddress,
     OceaDwelling,
+    OceaDwellingDetails,
     OceaMeter,
     OceaPds,
     OceaResident,
-    dwelling_address,
 )
 
 __all__ = [
     "OccupationStatus",
+    "OceaAddress",
     "OceaApiClient",
     "OceaApiError",
     "OceaAuthError",
     "OceaDwelling",
+    "OceaDwellingDetails",
     "OceaMeter",
     "OceaPds",
     "OceaResident",
-    "dwelling_address",
 ]

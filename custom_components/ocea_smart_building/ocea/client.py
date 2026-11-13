@@ -12,7 +12,7 @@ from aiohttp import ClientSession, ClientTimeout
 from .auth import OceaAuthentication
 from .const import API_BASE, B2C_REDIRECT_URI
 from .exceptions import OceaApiError
-from .models import OceaResident
+from .models import OceaDwellingDetails, OceaResident
 
 _LOGGER = logging.getLogger(__name__)
 _TIMEOUT = ClientTimeout(total=30)
@@ -92,10 +92,11 @@ class OceaApiClient:
             await self._api_request("GET", f"/api/v1/local/{path_id}/dashboard/consos")
         )
 
-    async def get_dwelling_details(self, local_id: str) -> dict[str, object]:
-        """Get the details of an accessible dwelling."""
+    async def get_dwelling_details(self, local_id: str) -> OceaDwellingDetails:
+        """Get and validate the details of an accessible dwelling."""
         path_id = quote(local_id, safe="")
-        return _object_response(await self._api_request("GET", f"/api/v1/local/{path_id}"))
+        result = await self._api_request("GET", f"/api/v1/local/{path_id}")
+        return OceaDwellingDetails.from_api(_object_response(result))
 
     async def get_pds(self) -> list[dict[str, object]]:
         """Get the configured dwelling's points of measurement."""

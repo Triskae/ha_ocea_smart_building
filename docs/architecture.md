@@ -81,7 +81,9 @@ C4Component
 
 Home Assistant lifecycle and presentation concerns stay in the integration
 modules. The `ocea/` package owns Ocea HTTP requests, response-shape validation,
-authentication, API models, and client exceptions.
+authentication, API models, and client exceptions. Resident information and
+dwelling details, including structured addresses, are converted to typed
+models at the client boundary. Address formatting belongs to the config flow.
 
 ## Runtime flow
 
