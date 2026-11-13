@@ -27,7 +27,6 @@ from .ocea import (
     OceaApiError,
     OceaAuthError,
     OceaDwelling,
-    OceaResident,
     dwelling_address,
 )
 
@@ -91,7 +90,8 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
             try:
-                resident = OceaResident.from_api(await client.validate_credentials())
+                await client.validate_credentials()
+                resident = await client.get_resident()
                 if not resident.dwellings:
                     errors["base"] = "no_occupation"
                 else:
@@ -210,7 +210,8 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
             try:
-                resident = OceaResident.from_api(await client.validate_credentials())
+                await client.validate_credentials()
+                resident = await client.get_resident()
                 await self.async_set_unique_id(user_input[CONF_EMAIL].lower())
                 self._abort_if_unique_id_mismatch()
                 if not resident.dwellings:
@@ -291,7 +292,8 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
             try:
-                resident = OceaResident.from_api(await client.validate_credentials())
+                await client.validate_credentials()
+                resident = await client.get_resident()
                 if not resident.dwellings:
                     errors["base"] = "no_occupation"
                 elif not await self._accessible_dwellings(

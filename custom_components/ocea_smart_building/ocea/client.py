@@ -12,6 +12,7 @@ from aiohttp import ClientSession, ClientTimeout
 from .auth import OceaAuthentication
 from .const import API_BASE, B2C_REDIRECT_URI
 from .exceptions import OceaApiError
+from .models import OceaResident
 
 _LOGGER = logging.getLogger(__name__)
 _TIMEOUT = ClientTimeout(total=30)
@@ -72,10 +73,10 @@ class OceaApiClient:
             raise OceaApiError(f"API error: HTTP {status}", status=status)
         raise OceaApiError("API authentication retry exhausted")
 
-    async def get_resident(self) -> dict[str, object]:
-        """Get resident info including occupations (logementId)."""
+    async def get_resident(self) -> OceaResident:
+        """Get and validate resident information and occupations."""
         result = await self._api_request("GET", "/api/v1/resident")
-        return _object_response(result)
+        return OceaResident.from_api(_object_response(result))
 
     async def get_consumptions(self) -> list[dict[str, object]]:
         """Get dwelling consumption data."""
@@ -118,10 +119,9 @@ class OceaApiClient:
             )
         )
 
-    async def validate_credentials(self) -> dict[str, object]:
-        """Authenticate and return the resident API response."""
+    async def validate_credentials(self) -> None:
+        """Validate credentials through B2C without requesting resident data."""
         await self._auth.authenticate()
-        return await self.get_resident()
 
 
 def _object_response(response: object) -> dict[str, object]:

@@ -15,6 +15,7 @@ from custom_components.ocea_smart_building.ocea import (
     OceaApiClient,
     OceaApiError,
     OceaAuthError,
+    OceaResident,
 )
 
 pytestmark = pytest.mark.usefixtures("local_http_only")
@@ -103,7 +104,9 @@ async def test_validate_credentials_preserves_b2c_flow(aiohttp_server, monkeypat
     await _server(aiohttp_server, monkeypatch, state)
     async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as session:
         client = _client(session)
-        assert await client.validate_credentials() == {"resident": {}, "occupations": []}
+        assert await client.validate_credentials() is None
+        assert state.get("requests", []) == []
+        assert await client.get_resident() == OceaResident(name="", dwellings=())
         assert not session.closed
 
     assert state["login_path"].endswith("?tx=StateProperties=abc==&p=B2C_1A_SIGNUP_SIGNIN")
@@ -117,6 +120,7 @@ async def test_validate_credentials_preserves_b2c_flow(aiohttp_server, monkeypat
     digest = hashlib.sha256(token["code_verifier"].encode()).digest()
     assert state["authorize"]["code_challenge"] == base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
     assert state["requests"] == [("GET", "/api/v1/resident", "Bearer token-placeholder")]
+    assert len(state["token_forms"]) == 1
 
 
 @pytest.mark.parametrize("method", ["GET", "POST"])
@@ -251,8 +255,32 @@ async def test_first_api_call_authenticates_when_token_is_missing(aiohttp_server
     state = {}
     await _server(aiohttp_server, monkeypatch, state)
     async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as session:
-        assert await _client(session).get_resident() == {"resident": {}, "occupations": []}
+        assert await _client(session).get_resident() == OceaResident(name="", dwellings=())
     assert state["requests"][0][2] == "Bearer token-placeholder"
+
+
+async def test_get_resident_returns_validated_model(aiohttp_server, monkeypatch):
+    state = {"api_response": {
+        "resident": {"prenom": "Synthetic"},
+        "occupations": [{"logementId": "synthetic-dwelling"}],
+    }}
+    await _server(aiohttp_server, monkeypatch, state)
+    async with aiohttp.ClientSession() as session:
+        client = _client(session)
+        client._auth._access_token = "token-placeholder"
+        resident = await client.get_resident()
+    assert resident.name == "Synthetic"
+    assert [dwelling.local_id for dwelling in resident.dwellings] == ["synthetic-dwelling"]
+
+
+async def test_get_resident_rejects_invalid_occupation(aiohttp_server, monkeypatch):
+    state = {"api_response": {"occupations": [{"logementId": None}]}}
+    await _server(aiohttp_server, monkeypatch, state)
+    async with aiohttp.ClientSession() as session:
+        client = _client(session)
+        client._auth._access_token = "token-placeholder"
+        with pytest.raises(OceaApiError, match="Invalid dwelling identifier"):
+            await client.get_resident()
 
 
 async def test_refresh_updates_rotated_refresh_token(aiohttp_server, monkeypatch):

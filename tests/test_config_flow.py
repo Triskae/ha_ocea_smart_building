@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import ANY, patch
+from unittest.mock import ANY, call, patch
 
 import pytest
 import voluptuous as vol
@@ -23,7 +23,11 @@ from custom_components.ocea_smart_building.const import (
     PASSWORD_NOT_CHANGED,
     UA,
 )
-from custom_components.ocea_smart_building.ocea import OceaApiError, OceaAuthError
+from custom_components.ocea_smart_building.ocea import (
+    OceaApiError,
+    OceaAuthError,
+    OceaResident,
+)
 
 OLD_EMAIL = "resident@example.com"
 OLD_PASSWORD = "stored-secret"
@@ -34,6 +38,7 @@ RESIDENT_DATA = {
     "resident": {"prenom": "Alice"},
     "occupations": [{"logementId": OLD_LOCAL_ID}],
 }
+RESIDENT = OceaResident.from_api(RESIDENT_DATA)
 
 
 @pytest.fixture
@@ -65,8 +70,9 @@ async def test_user_flow_recovers_from_auth_error(hass: HomeAssistant) -> None:
     ):
         client_class.return_value.validate_credentials.side_effect = [
             OceaAuthError("invalid credentials"),
-            RESIDENT_DATA,
+            None,
         ]
+        client_class.return_value.get_resident.return_value = RESIDENT
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
         inputs = {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: OLD_PASSWORD}
         result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
@@ -75,6 +81,7 @@ async def test_user_flow_recovers_from_auth_error(hass: HomeAssistant) -> None:
         result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
         assert result["type"] is FlowResultType.CREATE_ENTRY
         assert result["result"].unique_id == OLD_EMAIL
+        client_class.return_value.get_resident.assert_awaited_once_with()
         await hass.async_block_till_done()
 
     sessions = [call.kwargs["session"] for call in client_class.call_args_list]
@@ -115,8 +122,9 @@ async def test_reauth_recovers_from_auth_error(
     ):
         client_class.return_value.validate_credentials.side_effect = [
             OceaAuthError("invalid credentials"),
-            RESIDENT_DATA,
+            None,
         ]
+        client_class.return_value.get_resident.return_value = RESIDENT
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
             context={"source": SOURCE_REAUTH, "entry_id": config_entry.entry_id},
@@ -171,7 +179,7 @@ async def test_successful_reauthentication_preserves_entry_data(
         ) as client_class,
         patch.object(hass.config_entries, "async_schedule_reload") as schedule_reload,
     ):
-        client_class.return_value.validate_credentials.return_value = RESIDENT_DATA
+        client_class.return_value.get_resident.return_value = RESIDENT
         result = await _async_init_reauth(hass, config_entry)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -197,7 +205,7 @@ async def test_reauthentication_rejects_a_different_account(
     with patch(
         "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
     ) as client_class:
-        client_class.return_value.validate_credentials.return_value = RESIDENT_DATA
+        client_class.return_value.get_resident.return_value = RESIDENT
         result = await _async_init_reauth(hass, config_entry)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -285,7 +293,10 @@ async def test_flows_recover_from_errors(
         patch("custom_components.ocea_smart_building.async_setup_entry", return_value=True),
         patch.object(hass.config_entries, "async_schedule_reload"),
     ):
-        client_class.return_value.validate_credentials.side_effect = [failure, RESIDENT_DATA]
+        client_class.return_value.get_resident.side_effect = [
+            OceaResident.from_api(failure) if isinstance(failure, dict) else failure,
+            RESIDENT,
+        ]
         result = await hass.config_entries.flow.async_init(DOMAIN, context=context)
         inputs = {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: "replacement"}
         result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
@@ -327,7 +338,7 @@ async def test_reconfigure_rejects_duplicate_account(
     with patch(
         "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
     ) as client_class:
-        client_class.return_value.validate_credentials.return_value = RESIDENT_DATA
+        client_class.return_value.get_resident.return_value = RESIDENT
         result = await _async_init_reconfigure(hass, config_entry)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -367,9 +378,9 @@ async def test_flows_use_validated_dwelling_when_name_missing(
         patch("custom_components.ocea_smart_building.async_setup_entry", return_value=True),
         patch.object(hass.config_entries, "async_schedule_reload"),
     ):
-        client_class.return_value.validate_credentials.return_value = {
+        client_class.return_value.get_resident.return_value = OceaResident.from_api({
             "occupations": [{"logementId": OLD_LOCAL_ID}]
-        }
+        })
         result = await hass.config_entries.flow.async_init(DOMAIN, context=context)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -397,10 +408,10 @@ async def test_reauth_preserves_dwelling_and_updates_title(
         ) as client_class,
         patch.object(hass.config_entries, "async_schedule_reload"),
     ):
-        client_class.return_value.validate_credentials.return_value = {
+        client_class.return_value.get_resident.return_value = OceaResident.from_api({
             "resident": {"prenom": "Bob"},
             "occupations": [{"logementId": "new-dwelling"}, {"logementId": OLD_LOCAL_ID}],
-        }
+        })
         result = await _async_init_reauth(hass, config_entry)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: "replacement"}
@@ -449,7 +460,7 @@ async def test_successful_reconfiguration(
         ) as client_class,
         patch.object(hass.config_entries, "async_schedule_reload") as schedule_reload,
     ):
-        client_class.return_value.validate_credentials.return_value = resident_data
+        client_class.return_value.get_resident.return_value = OceaResident.from_api(resident_data)
         result = await _async_init_reconfigure(hass, config_entry)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -522,7 +533,7 @@ async def test_reconfigure_preserves_secrets(
         ) as client_class,
         patch.object(hass.config_entries, "async_schedule_reload"),
     ):
-        client_class.return_value.validate_credentials.return_value = RESIDENT_DATA
+        client_class.return_value.get_resident.return_value = RESIDENT
         result = await _async_init_reconfigure(hass, config_entry)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -555,7 +566,7 @@ async def test_reconfigure_without_changes_does_not_reload(
         ) as client_class,
         patch.object(hass.config_entries, "async_schedule_reload") as schedule_reload,
     ):
-        client_class.return_value.validate_credentials.return_value = RESIDENT_DATA
+        client_class.return_value.get_resident.return_value = RESIDENT
         result = await _async_init_reconfigure(hass, config_entry)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -686,7 +697,7 @@ async def test_user_selects_accessible_dwelling(
         patch("custom_components.ocea_smart_building.async_setup_entry", return_value=True),
     ):
         client = client_class.return_value
-        client.validate_credentials.return_value = data
+        client.get_resident.return_value = OceaResident.from_api(data)
         client.check_dwelling_access.side_effect = check_access
         client.get_dwelling_details.side_effect = [
             {"local": {"adresse": {"ville": "Example"}}},
@@ -737,7 +748,7 @@ async def test_existing_dwelling_cannot_be_switched_implicitly(
         if unavailable == "forbidden":
             occupations.append({"logementId": OLD_LOCAL_ID})
             client.check_dwelling_access.side_effect = OceaApiError("forbidden", status=403)
-        client.validate_credentials.return_value = {"occupations": occupations}
+        client.get_resident.return_value = OceaResident.from_api({"occupations": occupations})
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": source, "entry_id": config_entry.entry_id}
         )
@@ -747,7 +758,7 @@ async def test_existing_dwelling_cannot_be_switched_implicitly(
         assert result["errors"] == {"base": "no_dwelling_access"}
         assert config_entry.data[CONF_LOCAL_ID] == OLD_LOCAL_ID
         assert config_entry.data[CONF_PASSWORD] == OLD_PASSWORD
-        client.validate_credentials.return_value = RESIDENT_DATA
+        client.get_resident.return_value = RESIDENT
         client.check_dwelling_access.side_effect = None
         with patch.object(hass.config_entries, "async_schedule_reload"):
             result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
@@ -775,7 +786,7 @@ async def test_user_access_errors_can_be_retried(
         patch("custom_components.ocea_smart_building.async_setup_entry", return_value=True),
     ):
         client = client_class.return_value
-        client.validate_credentials.return_value = RESIDENT_DATA
+        client.get_resident.return_value = RESIDENT
         client.check_dwelling_access.side_effect = [failure, None]
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
         inputs = {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: OLD_PASSWORD}
@@ -784,6 +795,81 @@ async def test_user_access_errors_can_be_retried(
         result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
         assert result["type"] is FlowResultType.CREATE_ENTRY
         await hass.async_block_till_done()
+
+
+@pytest.mark.parametrize("source", [SOURCE_USER, SOURCE_REAUTH, SOURCE_RECONFIGURE])
+@pytest.mark.parametrize(
+    ("failure", "error"),
+    [
+        (OceaApiError("unauthorized", status=401), "invalid_auth"),
+        (OceaApiError("forbidden", status=403), "cannot_connect"),
+        (OceaApiError("unavailable", status=500), "cannot_connect"),
+        (OceaApiError("invalid resident response"), "cannot_connect"),
+        (TimeoutError(), "cannot_connect"),
+    ],
+)
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_resident_fetch_failure_does_not_save_and_allows_retry(
+    hass: HomeAssistant, source: str, failure: Exception, error: str
+) -> None:
+    entry = None
+    context = {"source": source}
+    if source != SOURCE_USER:
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            unique_id=OLD_EMAIL,
+            title=OLD_TITLE,
+            data={
+                CONF_EMAIL: OLD_EMAIL,
+                CONF_PASSWORD: OLD_PASSWORD,
+                CONF_LOCAL_ID: OLD_LOCAL_ID,
+                "access_token": "hidden-token",
+            },
+        )
+        entry.add_to_hass(hass)
+        context["entry_id"] = entry.entry_id
+    with (
+        patch(
+            "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
+        ) as client_class,
+        patch("custom_components.ocea_smart_building.async_setup_entry", return_value=True),
+        patch.object(hass.config_entries, "async_schedule_reload") as schedule_reload,
+    ):
+        client = client_class.return_value
+        client.get_resident.side_effect = [failure, RESIDENT]
+        result = await hass.config_entries.flow.async_init(DOMAIN, context=context)
+        inputs = {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: "replacement"}
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
+        assert result["type"] is FlowResultType.FORM
+        assert result["errors"] == {"base": error}
+        assert client.validate_credentials.await_count == 1
+        client.get_resident.assert_awaited_once_with()
+        client.check_dwelling_access.assert_not_awaited()
+        schedule_reload.assert_not_called()
+        if entry is None:
+            assert not hass.config_entries.async_entries(DOMAIN)
+        else:
+            assert entry.data[CONF_PASSWORD] == OLD_PASSWORD
+            assert entry.data[CONF_LOCAL_ID] == OLD_LOCAL_ID
+            assert entry.data["access_token"] == "hidden-token"
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
+        assert result["type"] is (
+            FlowResultType.CREATE_ENTRY if source == SOURCE_USER else FlowResultType.ABORT
+        )
+        if source != SOURCE_USER:
+            assert result["reason"] == f"{source}_successful"
+        assert client.validate_credentials.await_count == 2
+        assert client.get_resident.await_count == 2
+        client.check_dwelling_access.assert_awaited_once_with(OLD_LOCAL_ID)
+        assert client.method_calls == [
+            call.validate_credentials(),
+            call.get_resident(),
+            call.validate_credentials(),
+            call.get_resident(),
+            call.check_dwelling_access(OLD_LOCAL_ID),
+        ]
+        await hass.async_block_till_done()
+        assert all(call.kwargs["session"].closed for call in client_class.call_args_list)
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -795,9 +881,9 @@ async def test_detail_forbidden_leaves_single_valid_dwelling(hass: HomeAssistant
         patch("custom_components.ocea_smart_building.async_setup_entry", return_value=True),
     ):
         client = client_class.return_value
-        client.validate_credentials.return_value = {
+        client.get_resident.return_value = OceaResident.from_api({
             "occupations": [{"logementId": "first"}, {"logementId": "second"}]
-        }
+        })
         client.get_dwelling_details.side_effect = [
             OceaApiError("forbidden", status=403), {"local": {}}
         ]
@@ -829,9 +915,11 @@ async def test_dwelling_detail_errors_allow_retry(
         patch("custom_components.ocea_smart_building.async_setup_entry", return_value=True),
     ):
         client = client_class.return_value
-        client.validate_credentials.side_effect = [
-            {"occupations": [{"logementId": "first"}, {"logementId": "second"}]},
-            RESIDENT_DATA,
+        client.get_resident.side_effect = [
+            OceaResident.from_api(
+                {"occupations": [{"logementId": "first"}, {"logementId": "second"}]}
+            ),
+            RESIDENT,
         ]
         client.get_dwelling_details.side_effect = failure
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
@@ -849,9 +937,9 @@ async def test_abandon_dwelling_selection_discards_flow(hass: HomeAssistant) -> 
         "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
     ) as client_class:
         client = client_class.return_value
-        client.validate_credentials.return_value = {
+        client.get_resident.return_value = OceaResident.from_api({
             "occupations": [{"logementId": "first"}, {"logementId": "second"}]
-        }
+        })
         client.get_dwelling_details.return_value = {"local": {}}
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
         result = await hass.config_entries.flow.async_configure(
@@ -879,9 +967,11 @@ async def test_selector_translation_failure_can_be_retried(hass: HomeAssistant) 
         patch("custom_components.ocea_smart_building.async_setup_entry", return_value=True),
     ):
         client = client_class.return_value
-        client.validate_credentials.side_effect = [
-            {"occupations": [{"logementId": "first"}, {"logementId": "second"}]},
-            RESIDENT_DATA,
+        client.get_resident.side_effect = [
+            OceaResident.from_api(
+                {"occupations": [{"logementId": "first"}, {"logementId": "second"}]}
+            ),
+            RESIDENT,
         ]
         client.get_dwelling_details.return_value = {"local": {}}
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})

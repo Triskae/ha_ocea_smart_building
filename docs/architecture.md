@@ -86,12 +86,13 @@ authentication, API models, and client exceptions.
 ## Runtime flow
 
 The initial setup, reauthentication, and reconfiguration flows validate the
-submitted credentials against Ocea before saving them. Initial setup and
-reconfiguration also derive the dwelling identifier and entry title from
-validated resident data; the identifier is not user-editable. Reauthentication
-keeps the existing dwelling identifier and title. Reconfiguration keeps the
-stored password hidden, and applies changes through `data_updates` so unrelated
-entry data is retained.
+submitted credentials through B2C, retrieve the typed resident, and check
+access to the dwelling before saving anything. The client exposes these as
+separate authentication and resident-retrieval operations. Initial setup selects
+an accessible dwelling, while reauthentication and reconfiguration preserve
+the configured dwelling and update the title from validated resident data.
+Reconfiguration keeps the stored password hidden and applies changes through
+`data_updates` so unrelated entry data is retained.
 
 When an entry is set up, the integration creates its own Home Assistant-managed
 HTTP session and API client, then starts the coordinator. The first coordinator
