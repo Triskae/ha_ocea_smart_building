@@ -6,8 +6,8 @@ rules:
   appropriate-polling: done
   brands: todo
   common-modules: done
-  config-flow-test-coverage: todo
-  config-flow: todo
+  config-flow-test-coverage: done
+  config-flow: done
   dependency-transparency:
     status: exempt
     comment: The integration has no third-party runtime requirements; requests is only used by the standalone CLI.
