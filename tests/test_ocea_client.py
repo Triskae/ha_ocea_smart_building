@@ -65,6 +65,7 @@ async def _server(aiohttp_server, monkeypatch, state):
         )
 
     async def api(request):
+        state.setdefault("raw_paths", []).append(request.raw_path)
         state.setdefault("requests", []).append(
             (request.method, request.path, request.headers.get("Authorization"))
         )
@@ -216,14 +217,55 @@ async def test_refresh_without_access_token_fails(aiohttp_server, monkeypatch):
             await client._auth.refresh_access_token()
 
 
-async def test_get_consumptions_targets_configured_dwelling(aiohttp_server, monkeypatch):
+async def test_client_targets_each_requested_dwelling(aiohttp_server, monkeypatch):
+    """One authenticated client can address distinct dwellings."""
     state = {"api_response": []}
     await _server(aiohttp_server, monkeypatch, state)
     async with aiohttp.ClientSession() as session:
         client = _client(session)
         client._auth._access_token = "token-placeholder"
         assert await client.get_consumptions("local-123") == []
-    assert state["requests"][0][1] == "/api/v1/local/local-123/dashboard/consos"
+        assert await client.get_pds("local-456") == []
+        state["api_response"] = {}
+        payload = {
+            "debut": "2026-09-01T00:00:00.000Z",
+            "fin": "2026-09-30T23:59:59.999Z",
+            "granularity": "Day",
+        }
+        assert (await client.get_pds_consumption("local-123", "pds-1", payload)).raw == {}
+        assert (await client.get_pds_consumption("local-456", "pds-2", payload)).raw == {}
+    assert [request[1] for request in state["requests"]] == [
+        "/api/v1/local/local-123/dashboard/consos",
+        "/api/v1/local/local-456/pds",
+        "/api/v1/local/local-123/pds/pds-1/conso",
+        "/api/v1/local/local-456/pds/pds-2/conso",
+    ]
+
+
+async def test_dwelling_and_pds_ids_are_escaped_in_paths(aiohttp_server, monkeypatch):
+    """Identifiers are treated as path segments rather than URL syntax."""
+    state = {"api_response": []}
+    await _server(aiohttp_server, monkeypatch, state)
+    async with aiohttp.ClientSession() as session:
+        client = _client(session)
+        client._auth._access_token = "token-placeholder"
+        await client.get_consumptions("local/one?x")
+        await client.get_pds("local/one?x")
+        state["api_response"] = {}
+        await client.get_pds_consumption(
+            "local/one?x",
+            "pds/two?x",
+            {
+                "debut": "2026-09-01T00:00:00.000Z",
+                "fin": "2026-09-30T23:59:59.999Z",
+                "granularity": "Day",
+            },
+        )
+    assert state["raw_paths"] == [
+        "/api/v1/local/local%2Fone%3Fx/dashboard/consos",
+        "/api/v1/local/local%2Fone%3Fx/pds",
+        "/api/v1/local/local%2Fone%3Fx/pds/pds%2Ftwo%3Fx/conso",
+    ]
 
 
 async def test_dwelling_access_and_details(aiohttp_server, monkeypatch):

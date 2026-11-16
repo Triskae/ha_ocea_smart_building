@@ -31,6 +31,8 @@ from custom_components.ocea_smart_building.ocea import (
     OceaResident,
 )
 
+pytestmark = pytest.mark.usefixtures("real_recorder")
+
 OLD_EMAIL = "resident@example.com"
 OLD_PASSWORD = "stored-secret"
 OLD_LOCAL_ID = "local-123"
@@ -49,7 +51,7 @@ def config_entry(hass: HomeAssistant) -> MockConfigEntry:
     entry = MockConfigEntry(
         domain=DOMAIN,
         title=OLD_TITLE,
-        unique_id=OLD_EMAIL,
+        unique_id=OLD_LOCAL_ID,
         data={
             CONF_EMAIL: OLD_EMAIL,
             CONF_PASSWORD: OLD_PASSWORD,
@@ -82,7 +84,7 @@ async def test_user_flow_recovers_from_auth_error(hass: HomeAssistant) -> None:
         assert result["errors"] == {"base": "invalid_auth"}
         result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
         assert result["type"] is FlowResultType.CREATE_ENTRY
-        assert result["result"].unique_id == OLD_EMAIL
+        assert result["result"].unique_id == OLD_LOCAL_ID
         client_class.return_value.get_resident.assert_awaited_once_with()
         await hass.async_block_till_done()
 
@@ -195,18 +197,21 @@ async def test_successful_reauthentication_preserves_entry_data(
     assert result["reason"] == "reauth_successful"
     assert config_entry.data[CONF_PASSWORD] == "new-secret"
     assert config_entry.data["access_token"] == "hidden-token"
-    assert config_entry.unique_id == OLD_EMAIL
+    assert config_entry.unique_id == OLD_LOCAL_ID
     schedule_reload.assert_called_once_with(config_entry.entry_id)
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_reauthentication_rejects_a_different_account(
+async def test_reauthentication_accepts_another_account_with_dwelling_access(
     hass: HomeAssistant, config_entry: MockConfigEntry
 ) -> None:
-    """Test reauth cannot replace the configured account identity."""
-    with patch(
-        "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
-    ) as client_class:
+    """Reauthentication identifies the dwelling, not the email address."""
+    with (
+        patch(
+            "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
+        ) as client_class,
+        patch.object(hass.config_entries, "async_schedule_reload"),
+    ):
         client_class.return_value.get_resident.return_value = RESIDENT
         result = await _async_init_reauth(hass, config_entry)
         result = await hass.config_entries.flow.async_configure(
@@ -218,8 +223,9 @@ async def test_reauthentication_rejects_a_different_account(
         )
 
     assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "unique_id_mismatch"
-    assert config_entry.data[CONF_PASSWORD] == OLD_PASSWORD
+    assert result["reason"] == "reauth_successful"
+    assert config_entry.data[CONF_PASSWORD] == "new-secret"
+    assert config_entry.unique_id == OLD_LOCAL_ID
 
 
 @pytest.mark.parametrize(
@@ -277,7 +283,7 @@ async def test_flows_recover_from_errors(
     if source != SOURCE_USER:
         entry = MockConfigEntry(
             domain=DOMAIN,
-            unique_id=OLD_EMAIL,
+            unique_id=OLD_LOCAL_ID,
             title=OLD_TITLE,
             data={
                 CONF_EMAIL: OLD_EMAIL,
@@ -307,7 +313,7 @@ async def test_flows_recover_from_errors(
         result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs)
         if source == SOURCE_USER:
             assert result["type"] is FlowResultType.CREATE_ENTRY
-            assert result["result"].unique_id == OLD_EMAIL
+            assert result["result"].unique_id == OLD_LOCAL_ID
         else:
             assert result["type"] is FlowResultType.ABORT
             assert result["reason"] == f"{source}_successful"
@@ -317,29 +323,81 @@ async def test_flows_recover_from_errors(
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_user_flow_rejects_duplicate_account(
+async def test_user_flow_rejects_duplicate_dwelling(
     hass: HomeAssistant, config_entry: MockConfigEntry
 ) -> None:
-    """An existing account cannot be added twice, regardless of email case."""
-    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {CONF_EMAIL: OLD_EMAIL.upper(), CONF_PASSWORD: "replacement"},
-    )
+    """A dwelling cannot be added twice, even with another account."""
+    with patch(
+        "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
+    ) as client_class:
+        client_class.return_value.get_resident.return_value = RESIDENT
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_EMAIL: "other@example.com", CONF_PASSWORD: "replacement"},
+        )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_reconfigure_rejects_duplicate_account(
-    hass: HomeAssistant, config_entry: MockConfigEntry
+async def test_user_flow_rejects_unmigrated_duplicate_dwelling(
+    hass: HomeAssistant,
 ) -> None:
-    """Reconfiguration cannot take over an already configured account."""
-    other = MockConfigEntry(domain=DOMAIN, unique_id="other@example.com")
-    other.add_to_hass(hass)
+    """Entries not yet migrated are still detected by their stored dwelling."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, version=1, unique_id=OLD_EMAIL,
+        data={CONF_EMAIL: OLD_EMAIL, CONF_LOCAL_ID: OLD_LOCAL_ID},
+    )
+    entry.add_to_hass(hass)
     with patch(
         "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
     ) as client_class:
+        client_class.return_value.get_resident.return_value = RESIDENT
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_EMAIL: "other@example.com", CONF_PASSWORD: OLD_PASSWORD}
+        )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_same_account_can_add_another_dwelling(hass: HomeAssistant) -> None:
+    """The same account can configure two distinct dwellings."""
+    existing = MockConfigEntry(
+        domain=DOMAIN, unique_id="first",
+        data={CONF_EMAIL: OLD_EMAIL, CONF_LOCAL_ID: "first"},
+    )
+    existing.add_to_hass(hass)
+    with (
+        patch(
+            "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
+        ) as client_class,
+        patch("custom_components.ocea_smart_building.async_setup_entry", return_value=True),
+    ):
+        client_class.return_value.get_resident.return_value = RESIDENT
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_EMAIL: OLD_EMAIL, CONF_PASSWORD: OLD_PASSWORD}
+        )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == OLD_LOCAL_ID
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_reconfigure_accepts_account_used_for_another_dwelling(
+    hass: HomeAssistant, config_entry: MockConfigEntry
+) -> None:
+    """Different dwellings may use the same credentials."""
+    other = MockConfigEntry(domain=DOMAIN, unique_id="another-local")
+    other.add_to_hass(hass)
+    with (
+        patch(
+            "custom_components.ocea_smart_building.config_flow.OceaApiClient", autospec=True
+        ) as client_class,
+        patch.object(hass.config_entries, "async_schedule_reload"),
+    ):
         client_class.return_value.get_resident.return_value = RESIDENT
         result = await _async_init_reconfigure(hass, config_entry)
         result = await hass.config_entries.flow.async_configure(
@@ -347,8 +405,8 @@ async def test_reconfigure_rejects_duplicate_account(
             {CONF_EMAIL: "other@example.com", CONF_PASSWORD: "replacement"},
         )
     assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "already_configured"
-    assert config_entry.data[CONF_EMAIL] == OLD_EMAIL
+    assert result["reason"] == "reconfigure_successful"
+    assert config_entry.data[CONF_EMAIL] == "other@example.com"
     assert client_class.call_args.kwargs["session"].closed
 
 
@@ -363,7 +421,7 @@ async def test_flows_use_validated_dwelling_when_name_missing(
     if source != SOURCE_USER:
         entry = MockConfigEntry(
             domain=DOMAIN,
-            unique_id=OLD_EMAIL,
+            unique_id=OLD_LOCAL_ID,
             title=OLD_TITLE,
             data={
                 CONF_EMAIL: OLD_EMAIL,
@@ -480,7 +538,7 @@ async def test_successful_reconfiguration(
         CONF_LOCAL_ID: OLD_LOCAL_ID,
         "access_token": "hidden-token",
     }
-    assert config_entry.unique_id == new_email
+    assert config_entry.unique_id == OLD_LOCAL_ID
     assert config_entry.title == "Ocea - Bob"
     schedule_reload.assert_called_once_with(config_entry.entry_id)
     assert client_class.call_args.kwargs["session"].closed
@@ -640,6 +698,12 @@ def test_flow_translations_cover_fields_and_abort_reasons(filename: str) -> None
     """Every credential field and user-visible abort has a translation."""
     path = Path(__file__).parents[1] / "custom_components" / DOMAIN / filename
     config = json.loads(path.read_text(encoding="utf-8"))["config"]
+    expected_duplicate = (
+        "This dwelling is already configured"
+        if filename == "translations/en.json"
+        else "Ce logement est déjà configuré"
+    )
+    assert config["abort"]["already_configured"] == expected_duplicate
     for step in ("user", "reauth_confirm", "reconfigure"):
         assert set(config["step"][step]["data"]) == {CONF_EMAIL, CONF_PASSWORD}
         assert set(config["step"][step]["data_description"]) == {CONF_EMAIL, CONF_PASSWORD}
@@ -821,7 +885,7 @@ async def test_resident_fetch_failure_does_not_save_and_allows_retry(
     if source != SOURCE_USER:
         entry = MockConfigEntry(
             domain=DOMAIN,
-            unique_id=OLD_EMAIL,
+            unique_id=OLD_LOCAL_ID,
             title=OLD_TITLE,
             data={
                 CONF_EMAIL: OLD_EMAIL,
