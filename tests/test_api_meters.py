@@ -27,9 +27,56 @@ pytestmark = pytest.mark.usefixtures("local_http_only")
     [
         ("pds", "/api/v1/local/local-123/pds", None, [{"id": "pds-1"}]),
         ("appareils", "/api/v1/local/appareils", {"pdsIds": ["pds-1"]}, []),
-        ("consumption", "/api/v1/local/local-123/pds/pds-1/conso", {
-            "debut": "2026-01-01", "fin": "2026-01-31", "granularity": "Day"
-        }, {}),
+        (
+            "consumption",
+            "/api/v1/local/local-123/pds/pds-1/conso",
+            {"debut": "2026-01-01", "fin": "2026-01-31", "granularity": "Day"},
+            {},
+        ),
+        (
+            "consumption",
+            "/api/v1/local/local-123/pds/pds-1/conso",
+            {"debut": "2026-09-01T00:00:00.000Z", "fin": "2026-09-30T23:59:59.999Z", "granularity": "Day"},
+            {
+                "unite": "kWh",
+                "consommations": [
+                    {"type": "ConsommationResponse", "date": "2026-09-01", "valeur": 1.2}
+                ],
+            },
+        ),
+        (
+            "consumption",
+            "/api/v1/local/local-123/pds/pds-1/conso",
+            {"debut": "2026-09-01T00:00:00.000Z", "fin": "2026-09-30T23:59:59.999Z", "granularity": "Day"},
+            {
+                "unite": "m3",
+                "consommations": [
+                    {
+                        "type": "ConsommationEauResponse",
+                        "date": "2026-09-01",
+                        "valeur": 1.2,
+                        "fuiteEstimee": 0.1,
+                    }
+                ],
+            },
+        ),
+        (
+            "consumption",
+            "/api/v1/local/local-123/pds/pds-1/conso",
+            {"debut": "2026-09-01T00:00:00.000Z", "fin": "2026-09-30T23:59:59.999Z", "granularity": "Day"},
+            {
+                "unite": "kWh",
+                "consommations": [
+                    {
+                        "type": "ConsommationRfcResponse",
+                        "date": "2026-09-01",
+                        "valeur": 1.2,
+                        "valeurCoefficientee": 1.5,
+                        "emplacement": "Salon",
+                    }
+                ],
+            },
+        ),
     ],
 )
 async def test_meter_endpoints(aiohttp_server, monkeypatch, method, path, payload, result):
@@ -59,6 +106,113 @@ async def test_meter_endpoints(aiohttp_server, monkeypatch, method, path, payloa
             actual = await client.get_pds_consumption("local-123", "pds-1", payload)
     assert ([item.raw for item in actual] if isinstance(actual, list) else actual.raw) == result
     assert seen == [(path, "Bearer placeholder", "GET" if payload is None else "POST")]
+
+
+@pytest.mark.parametrize(
+    ("result", "item_type", "expected_date", "expected_value"),
+    [
+        (
+            {"consommations": [{"type": "OtherResponse", "date": "2026-09-01", "valeur": 1}]},
+            OceaUnclassifiedConsumptionData,
+            "2026-09-01",
+            Decimal(1),
+        ),
+        (
+            {"consommations": [{"type": "ConsommationResponse", "date": 20260901, "valeur": 1}]},
+            OceaGenericConsumptionData,
+            None,
+            Decimal(1),
+        ),
+        (
+            {"consommations": [{"type": "ConsommationResponse", "date": "2026-09-01"}]},
+            OceaGenericConsumptionData,
+            "2026-09-01",
+            None,
+        ),
+        (
+            {"consommations": [{"type": "ConsommationResponse", "date": "2026-09-01", "valeur": True}]},
+            OceaGenericConsumptionData,
+            "2026-09-01",
+            None,
+        ),
+        (
+            {"consommations": [{"type": "ConsommationResponse", "date": "2026-09-01", "valeur": None}]},
+            OceaGenericConsumptionData,
+            "2026-09-01",
+            None,
+        ),
+    ],
+)
+async def test_consumption_endpoint_tolerates_unknown_and_invalid_readings(
+    aiohttp_server, monkeypatch, result, item_type, expected_date, expected_value
+):
+    """Keep unknown variants and tolerate missing or invalid reading values."""
+    async def handler(request):
+        return web.json_response(result)
+
+    app = web.Application()
+    app.router.add_post("/api/v1/local/local-123/pds/pds-1/conso", handler)
+    server = await aiohttp_server(app)
+    monkeypatch.setattr(
+        "custom_components.ocea_smart_building.ocea.client.API_BASE",
+        str(server.make_url("/")).rstrip("/"),
+    )
+    async with aiohttp.ClientSession() as session:
+        client = OceaApiClient("resident@example.com", "placeholder", user_agent=UA, session=session)
+        client._auth._access_token = "placeholder"
+        actual = await client.get_pds_consumption(
+            "local-123",
+            "pds-1",
+            {
+                "debut": "2026-09-01T00:00:00.000Z",
+                "fin": "2026-09-30T23:59:59.999Z",
+                "granularity": "Day",
+            },
+        )
+    assert actual.raw == result
+    item = actual.items[0]
+    assert isinstance(item, item_type)
+    assert (item.date.isoformat() if item.date else None) == expected_date
+    assert item.value == expected_value
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "response"),
+    [
+        (
+            "pds",
+            "/api/v1/local/local-123/pds",
+            [{"id": "pds-1", "fluide": "Cetc", "fce": "invalid"}],
+        ),
+        (
+            "appareils",
+            "/api/v1/local/appareils",
+            [{"pdsId": "pds-1", "fc": True}],
+        ),
+    ],
+)
+async def test_metadata_endpoints_retain_unvalidated_fields(
+    aiohttp_server, monkeypatch, method, path, response
+):
+    """Discovery preserves metadata not validated by these endpoints."""
+    async def handler(request):
+        return web.json_response(response)
+
+    app = web.Application()
+    app.router.add_route("*", path, handler)
+    server = await aiohttp_server(app)
+    monkeypatch.setattr(
+        "custom_components.ocea_smart_building.ocea.client.API_BASE",
+        str(server.make_url("/")).rstrip("/"),
+    )
+    async with aiohttp.ClientSession() as session:
+        client = OceaApiClient("resident@example.com", "placeholder", user_agent=UA, session=session)
+        client._auth._access_token = "placeholder"
+        if method == "pds":
+            actual = await client.get_pds("local-123")
+        else:
+            actual = await client.get_appareils({"pdsIds": ["pds-1"]})
+    assert [item.raw for item in actual] == response
 
 
 @pytest.mark.parametrize("method", ["GET", "POST"])
@@ -135,6 +289,7 @@ async def test_one_client_targets_explicit_encoded_identifiers(aiohttp_server, m
     ("method", "response"),
     [
         ("dashboard", [{"fluide": False}]),
+        ("dashboard", [{"fluide": [], "valeur": 1}]),
         ("pds", [{"id": True}]),
         ("pds", [{"fluide": False}]),
         ("devices", [{"pdsId": []}]),

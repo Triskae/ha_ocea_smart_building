@@ -14,13 +14,178 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from yarl import URL
 
-from custom_components.ocea_smart_building import PLATFORMS, async_setup_entry
+from custom_components.ocea_smart_building import (
+    PLATFORMS,
+    async_migrate_entry,
+    async_remove_entry,
+    async_setup_entry,
+)
 from custom_components.ocea_smart_building.const import CONF_LOCAL_ID, DOMAIN
+from custom_components.ocea_smart_building.history import history_store
 from custom_components.ocea_smart_building.ocea.models import (
     OceaConsumptionSeries,
     OceaDashboardData,
     OceaPdsData,
 )
+
+
+async def test_migrate_entry_preserves_data_and_identity(hass: HomeAssistant) -> None:
+    """Migrate an existing account entry without recreating it."""
+    data = {CONF_LOCAL_ID: "local-123", CONF_EMAIL: "resident@example.com", "hidden": "value"}
+    entry = MockConfigEntry(domain=DOMAIN, version=1, unique_id="resident@example.com", data=data)
+    entry.add_to_hass(hass)
+    entry_id = entry.entry_id
+
+    assert await async_migrate_entry(hass, entry)
+    assert entry.unique_id == "local-123"
+    assert entry.version == 2
+    assert entry.entry_id == entry_id
+    assert dict(entry.data) == data
+
+
+async def test_migrate_entry_rejects_duplicate_dwelling(hass: HomeAssistant) -> None:
+    """Do not overwrite another entry for the same dwelling."""
+    existing = MockConfigEntry(domain=DOMAIN, version=2, unique_id="local-123")
+    existing.add_to_hass(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN, version=1, unique_id="resident@example.com",
+        data={CONF_LOCAL_ID: "local-123"},
+    )
+    entry.add_to_hass(hass)
+
+    assert not await async_migrate_entry(hass, entry)
+    assert entry.version == 1
+    assert entry.unique_id == "resident@example.com"
+
+
+async def test_removing_entry_removes_cached_history(hass: HomeAssistant) -> None:
+    """Removing an entry removes its cache, not Recorder statistics."""
+    entry = MockConfigEntry(domain=DOMAIN)
+    await history_store(hass, entry).async_save({"meters": {}})
+    await async_remove_entry(hass, entry)
+    assert await history_store(hass, entry).async_load() is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "real_recorder")
+async def test_unload_cancels_history_task(hass: HomeAssistant) -> None:
+    """An ongoing history request is cancelled before unloading the entry."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        unique_id="local",
+        data={CONF_EMAIL: "resident@example.com", CONF_PASSWORD: "secret", CONF_LOCAL_ID: "local"},
+    )
+    entry.add_to_hass(hass)
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def blocked_resident() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    with patch("custom_components.ocea_smart_building.OceaApiClient", autospec=True) as client:
+        client.return_value.get_resident.side_effect = blocked_resident
+        client.return_value.get_pds.return_value = []
+        client.return_value.get_appareils.return_value = []
+        client.return_value.get_consumptions.return_value = []
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await asyncio.wait_for(started.wait(), timeout=3)
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        assert cancelled.is_set()
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "real_recorder")
+async def test_setup_keeps_only_water_leak_entities(
+    hass: HomeAssistant,
+) -> None:
+    """Water leaks remain entities, while CETC cannot create leak entities."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        unique_id="local",
+        data={CONF_EMAIL: "resident@example.com", CONF_PASSWORD: "secret", CONF_LOCAL_ID: "local"},
+    )
+    entry.add_to_hass(hass)
+    with (
+        patch("custom_components.ocea_smart_building.OceaApiClient", autospec=True) as client,
+        patch("custom_components.ocea_smart_building.OceaHistorySynchronizer", autospec=True),
+    ):
+        client.return_value.get_pds.return_value = [
+            OceaPdsData.from_api({"id": "pds-1", "fluide": "EauFroide"}),
+            OceaPdsData.from_api({"id": "pds-2", "fluide": "Cetc"}),
+            OceaPdsData.from_api({"id": "pds-3", "fluide": "CETC"}),
+        ]
+        client.return_value.get_appareils.return_value = []
+        client.return_value.get_consumptions.return_value = [
+            OceaDashboardData.from_api({"fluide": "EauFroide", "valeur": "1"}),
+            OceaDashboardData.from_api({"fluide": "Cetc", "valeur": "2"}),
+        ]
+        client.return_value.get_pds_consumption.side_effect = [
+            OceaConsumptionSeries.from_api({
+                "unite": "m3",
+                "consommations": [
+                    {
+                        "date": "2024-01-01",
+                        "valeur": 0.1,
+                        "fuiteEstimee": 0.01,
+                        "type": "ConsommationEauResponse",
+                    }
+                ],
+            }),
+            OceaConsumptionSeries.from_api({
+                "unite": "kWh",
+                "consommations": [
+                    {
+                        "date": "2024-01-01",
+                        "valeur": 1,
+                        "type": "ConsommationResponse",
+                    }
+                ],
+            }),
+            OceaConsumptionSeries.from_api({
+                "unite": "m3",
+                "consommations": [
+                    {
+                        "date": "2024-01-01",
+                        "valeur": 0.1,
+                        "fuiteEstimee": 0.01,
+                        "type": "ConsommationEauResponse",
+                    }
+                ],
+            }),
+            OceaConsumptionSeries.from_api({
+                "unite": "kWh",
+                "consommations": [
+                    {
+                        "date": "2024-01-01",
+                        "valeur": 1,
+                        "type": "ConsommationResponse",
+                    }
+                ],
+            }),
+        ]
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+        assert {entity.unique_id for entity in entities} == {
+            f"{DOMAIN}_local_pds-1_fuite",
+            f"{DOMAIN}_local_pds-1_fuite_detectee",
+        }
+        coordinator = entry.runtime_data
+        assert set(coordinator.data.meters) == {"pds-1", "pds-2"}
+        assert coordinator.data.meters["pds-2"].unit == "kWh"
+        await coordinator.async_request_refresh()
+        await hass.async_block_till_done()
+        entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+        assert {entity.unique_id for entity in entities} == {
+            f"{DOMAIN}_local_pds-1_fuite",
+            f"{DOMAIN}_local_pds-1_fuite_detectee",
+        }
+        assert await hass.config_entries.async_unload(entry.entry_id)
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -134,7 +299,7 @@ async def test_setup_detaches_session_when_platform_setup_fails(
     assert client_class.call_args.kwargs["session"].closed
 
 
-@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.usefixtures("enable_custom_integrations", "real_recorder")
 async def test_session_is_detached_after_entry_unload(hass: HomeAssistant) -> None:
     """The isolated session is alive during setup and detached after unload."""
     entry = MockConfigEntry(
@@ -145,6 +310,7 @@ async def test_session_is_detached_after_entry_unload(hass: HomeAssistant) -> No
     with (
         patch("custom_components.ocea_smart_building.OceaApiClient") as client_class,
         patch("custom_components.ocea_smart_building.OceaDataUpdateCoordinator", autospec=True),
+        patch("custom_components.ocea_smart_building.OceaHistorySynchronizer", autospec=True),
         patch.object(hass.config_entries, "async_forward_entry_setups", new_callable=AsyncMock),
         patch.object(hass.config_entries, "async_unload_platforms", new_callable=AsyncMock, return_value=True),
     ):
@@ -158,7 +324,7 @@ async def test_session_is_detached_after_entry_unload(hass: HomeAssistant) -> No
         assert session.closed
 
 
-@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.usefixtures("enable_custom_integrations", "real_recorder")
 async def test_unload_removes_sensor_update_listener(hass: HomeAssistant) -> None:
     """The dynamic sensor listener is removed with the config entry."""
     entry = MockConfigEntry(
@@ -170,7 +336,10 @@ async def test_unload_removes_sensor_update_listener(hass: HomeAssistant) -> Non
         },
     )
     entry.add_to_hass(hass)
-    with patch("custom_components.ocea_smart_building.OceaApiClient", autospec=True) as client:
+    with (
+        patch("custom_components.ocea_smart_building.OceaApiClient", autospec=True) as client,
+        patch("custom_components.ocea_smart_building.OceaHistorySynchronizer", autospec=True),
+    ):
         client.return_value.get_pds.return_value = [
             OceaPdsData.from_api({"id": "pds-1", "fluide": "EauFroide"})
         ]

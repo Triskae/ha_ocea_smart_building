@@ -237,7 +237,7 @@ async def test_system_health_info_aggregates_all_loaded_entries(
     assert await info["can_reach_server"] == "ok"
 
 
-@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.usefixtures("enable_custom_integrations", "real_recorder")
 async def test_system_health_tracks_real_entry_lifecycle(hass: HomeAssistant) -> None:
     """Health metrics follow loaded entries and exclude them after unloading."""
     entry = MockConfigEntry(
@@ -251,6 +251,7 @@ async def test_system_health_tracks_real_entry_lifecycle(hass: HomeAssistant) ->
     entry.add_to_hass(hass)
     with (
         patch("custom_components.ocea_smart_building.OceaApiClient", autospec=True) as client,
+        patch("custom_components.ocea_smart_building.OceaHistorySynchronizer", autospec=True),
         patch(
             "custom_components.ocea_smart_building.system_health.system_health"
             ".async_check_can_reach_url",

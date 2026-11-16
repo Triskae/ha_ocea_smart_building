@@ -9,7 +9,7 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_LOCAL_ID
+from .const import CONF_LOCAL_ID, PDS_FLUID_METADATA
 from .coordinator import OceaConfigEntry, OceaDataUpdateCoordinator, OceaMeterReading
 from .entity import OceaEntity, meter_device_info, meter_entity_unique_id
 from .ocea import OceaMeter
@@ -30,6 +30,7 @@ async def async_setup_entry(
     async_add_entities(
         OceaLeakBinarySensor(coordinator, local_id, reading.meter)
         for reading in readings
+        if PDS_FLUID_METADATA[reading.meter.pds.fluid].supports_water_leak_sensors
     )
 
 

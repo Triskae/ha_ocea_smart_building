@@ -70,11 +70,11 @@ rules:
   dynamic-devices: todo
   entity-category:
     status: exempt
-    comment: All entities expose primary consumption measurements.
+    comment: All entities expose primary leak measurements.
   entity-device-class: done
   entity-disabled-by-default:
     status: exempt
-    comment: The integration's entities are primary consumption measurements and are not noisy.
+    comment: The integration's entities are primary leak measurements and are not noisy.
   entity-translations: done
   exception-translations: todo
   icon-translations: todo

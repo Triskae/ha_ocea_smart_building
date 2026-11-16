@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
-from homeassistant.const import UnitOfEnergy, UnitOfVolume
+from homeassistant.const import UnitOfVolume
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.typing import UNDEFINED
@@ -40,7 +40,6 @@ from custom_components.ocea_smart_building.ocea.models import (
 from custom_components.ocea_smart_building.sensor import (
     SENSOR_TYPES,
     OceaMeterSensor,
-    OceaWaterSensor,
 )
 
 
@@ -51,23 +50,6 @@ def _coordinator(hass: HomeAssistant, client: Mock) -> OceaDataUpdateCoordinator
     coordinator = OceaDataUpdateCoordinator(hass, client, entry)
     assert coordinator.config_entry is entry
     return coordinator
-
-
-def test_sensor_types_include_cetc_heating_energy_sensor() -> None:
-    """Test CETC heating consumption is exposed as an energy sensor."""
-    sensors = {description.key: description for description in SENSOR_TYPES}
-
-    assert {"eau_froide", "eau_chaude", "cetc"} <= set(sensors)
-    assert sensors["eau_froide"].native_unit_of_measurement == UnitOfVolume.CUBIC_METERS
-    assert sensors["eau_chaude"].native_unit_of_measurement == UnitOfVolume.CUBIC_METERS
-
-    cetc = sensors["cetc"]
-    assert cetc.data_key == "cetc"
-    assert cetc.translation_key == "cetc"
-    assert cetc.name is UNDEFINED
-    assert cetc.native_unit_of_measurement == UnitOfEnergy.KILO_WATT_HOUR
-    assert cetc.device_class is SensorDeviceClass.ENERGY
-    assert cetc.state_class is SensorStateClass.TOTAL_INCREASING
 
 
 def test_leak_sensor_description_is_water_measurement() -> None:
@@ -105,8 +87,8 @@ def test_meter_data_builder_aggregates_one_meter_response() -> None:
 
 
 def test_current_month_payload_uses_requested_calendar_date() -> None:
-    """Test the API payload represents the local calendar month."""
-    assert _current_month_payload(date(2026, 9, 16)) == {
+    """Test the API payload represents the Ocea calendar month."""
+    assert _current_month_payload(datetime(2026, 9, 16, tzinfo=timezone.utc)) == {
         "debut": "2026-09-01T00:00:00.000Z",
         "fin": "2026-09-16T23:59:59.999Z",
         "granularity": "Day",
@@ -119,10 +101,10 @@ def test_coordinator_error_does_not_expose_exception_details(error: Exception) -
     assert "secret-url" not in str(_as_update_error(error))
 
 
-async def test_coordinator_uses_home_assistant_timezone(
+async def test_coordinator_uses_ocea_timezone(
     hass: HomeAssistant,
 ) -> None:
-    """Test current-month boundaries follow Home Assistant's timezone."""
+    """Test current-month boundaries follow Ocea's Paris calendar."""
     client = AsyncMock(spec=OceaApiClient)
     client.get_consumptions.return_value = []
     client.get_pds.return_value = [
@@ -134,13 +116,17 @@ async def test_coordinator_uses_home_assistant_timezone(
 
     with patch(
         "custom_components.ocea_smart_building.coordinator.dt_util.now",
-        return_value=datetime(2026, 9, 16, tzinfo=ZoneInfo("America/Montreal")),
+        return_value=datetime(2026, 9, 30, 18, tzinfo=ZoneInfo("America/Los_Angeles")),
     ):
         await coordinator._async_setup()
         await coordinator._async_update_data()
 
+    client.get_pds.assert_awaited_once_with("local-123")
+    client.get_consumptions.assert_awaited_once_with("local-123")
+    assert client.get_pds_consumption.call_args.args[:2] == ("local-123", "pds-cold-1")
     payload = client.get_pds_consumption.call_args.args[2]
-    assert payload["debut"] == "2026-09-01T00:00:00.000Z"
+    assert payload["debut"] == "2026-10-01T00:00:00.000Z"
+    assert payload["fin"] == "2026-10-01T23:59:59.999Z"
 
 
 async def test_coordinator_normalizes_cetc_consumption(hass: HomeAssistant) -> None:
@@ -285,7 +271,12 @@ def test_meter_data_builder_normalizes_string_leak_estimate() -> None:
         meter,
         OceaConsumptionSeries.from_api({
             "consommations": [
-                {"date": "2026-09-15", "valeur": "0,321", "fuiteEstimee": "0,015"}
+                {
+                    "date": "2026-09-15",
+                    "valeur": "0,321",
+                    "fuiteEstimee": "0,015",
+                    "type": "ConsommationEauResponse",
+                }
             ],
         }),
     )
@@ -397,15 +388,10 @@ def test_sensor_values_remain_floats() -> None:
             estimated_leak=Decimal("0.015"),
         )},
     )
-    description = next(description for description in SENSOR_TYPES if description.key == "cetc")
-    sensor = OceaWaterSensor(coordinator, description, "local")
-    assert sensor.native_value == 1.25
+    description = next(description for description in SENSOR_TYPES if description.key == "fuite")
+    sensor = OceaMeterSensor(coordinator, description, "local", meter)
+    assert sensor.native_value == 0.015
     assert isinstance(sensor.native_value, float)
-    for key, expected in (("eau_froide", 0.321), ("fuite", 0.015)):
-        meter_description = next(description for description in SENSOR_TYPES if description.key == key)
-        meter_sensor = OceaMeterSensor(coordinator, meter_description, "local", meter)
-        assert meter_sensor.native_value == expected
-        assert isinstance(meter_sensor.native_value, float)
 
 
 async def test_coordinator_isolates_malformed_meter_response(
@@ -520,7 +506,7 @@ def test_meter_sensor_uses_pds_id_and_serial_for_identity() -> None:
     description = next(
         description
         for description in SENSOR_TYPES
-        if description.key == "eau_froide"
+        if description.key == "fuite"
     )
     sensor = OceaMeterSensor(
         coordinator=coordinator,
@@ -537,10 +523,10 @@ def test_meter_sensor_uses_pds_id_and_serial_for_identity() -> None:
     )
 
     assert sensor.unique_id == (
-        "ocea_smart_building_local-123_pds-cold-1_eau_froide"
+        "ocea_smart_building_local-123_pds-cold-1_fuite"
     )
     assert sensor.has_entity_name is True
-    assert sensor.entity_description.translation_key == "eau_froide"
+    assert sensor.entity_description.translation_key == "fuite"
     assert sensor.entity_description.name is UNDEFINED
     assert not hasattr(sensor, "_attr_name")
     assert sensor.device_info["identifiers"] == {

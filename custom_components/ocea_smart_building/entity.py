@@ -10,16 +10,6 @@ from .coordinator import OceaDataUpdateCoordinator
 from .ocea import OceaMeter
 
 
-def local_device_info(local_id: str) -> DeviceInfo:
-    """Build the Home Assistant device descriptor for dwelling totals."""
-    return DeviceInfo(
-        identifiers={(DOMAIN, local_id)},
-        manufacturer="Ocea Smart Building",
-        translation_key="local",
-        translation_placeholders={"local_id": local_id},
-    )
-
-
 def meter_device_info(local_id: str, meter: OceaMeter) -> DeviceInfo:
     """Build the Home Assistant device descriptor for one meter."""
     identity = f"PDS {meter.identifier}"
@@ -33,11 +23,6 @@ def meter_device_info(local_id: str, meter: OceaMeter) -> DeviceInfo:
         translation_key="meter",
         translation_placeholders={"meter_identity": identity},
     )
-
-
-def local_entity_unique_id(local_id: str, key: str) -> str:
-    """Build the established unique ID for a dwelling-level sensor."""
-    return f"{DOMAIN}_{local_id}_{key}"
 
 
 def meter_entity_unique_id(local_id: str, meter: OceaMeter, key: str) -> str:
