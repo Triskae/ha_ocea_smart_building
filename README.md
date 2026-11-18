@@ -119,6 +119,9 @@ data flow, and contributor-facing design invariants.
 
 The standalone CLI uses Python and `requests`, without Home Assistant:
 
+Run the following commands in Bash. If your terminal uses another shell, such
+as zsh, run `bash` first; the password prompt below uses Bash-specific options.
+
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install requests
