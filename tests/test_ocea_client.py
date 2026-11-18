@@ -94,7 +94,7 @@ async def _server(aiohttp_server, monkeypatch, state):
 
 def _client(session):
     return OceaApiClient(
-        "resident@example.com", "placeholder-password", "local-123",
+        "resident@example.com", "placeholder-password",
         user_agent=UA, session=session,
     )
 
@@ -222,7 +222,7 @@ async def test_get_consumptions_targets_configured_dwelling(aiohttp_server, monk
     async with aiohttp.ClientSession() as session:
         client = _client(session)
         client._auth._access_token = "token-placeholder"
-        assert await client.get_consumptions() == []
+        assert await client.get_consumptions("local-123") == []
     assert state["requests"][0][1] == "/api/v1/local/local-123/dashboard/consos"
 
 
@@ -341,7 +341,7 @@ async def test_invalid_list_response(aiohttp_server, monkeypatch):
         client = _client(session)
         client._auth._access_token = "token-placeholder"
         with pytest.raises(OceaApiError, match="Invalid API list"):
-            await client.get_pds()
+            await client.get_pds("local-123")
 
 
 async def test_authentication_cookies_are_isolated_between_sessions(aiohttp_server, monkeypatch):

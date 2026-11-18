@@ -553,7 +553,6 @@ async def test_reconfigure_preserves_secrets(
         user_agent=UA,
         session=ANY,
         password=OLD_PASSWORD,
-        local_id=OLD_LOCAL_ID,
     )
 
 

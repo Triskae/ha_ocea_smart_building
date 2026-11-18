@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -17,6 +19,10 @@ from custom_components.ocea_smart_building.coordinator import (
     OceaMeterReading,
 )
 from custom_components.ocea_smart_building.ocea import OceaMeter, OceaPds
+from custom_components.ocea_smart_building.ocea.models import (
+    OceaConsumptionSeries,
+    OceaPdsData,
+)
 from custom_components.ocea_smart_building.system_health import (
     async_register,
     system_health_info,
@@ -108,7 +114,7 @@ async def test_system_health_info_reports_available_meter_readings(
             totals={},
             meters={
                 meter.identifier: OceaMeterReading(
-                    meter=meter, value=0.0, latest_date="2026-11-08"
+                    meter=meter, value=Decimal(0), latest_date=date(2026, 11, 8)
                 )
             },
         ),
@@ -147,7 +153,7 @@ async def test_system_health_info_reports_partial_meter_readings(
             totals={},
             meters={
                 available_meter.identifier: OceaMeterReading(
-                    meter=available_meter, value=0.321, latest_date="2026-11-08"
+                    meter=available_meter, value=Decimal("0.321"), latest_date=date(2026, 11, 8)
                 ),
                 unavailable_meter.identifier: OceaMeterReading(
                     meter=unavailable_meter, value=None, latest_date=None
@@ -193,7 +199,7 @@ async def test_system_health_info_aggregates_all_loaded_entries(
             totals={},
             meters={
                 first_meter.identifier: OceaMeterReading(
-                    meter=first_meter, value=0.321, latest_date="2026-11-08"
+                    meter=first_meter, value=Decimal("0.321"), latest_date=date(2026, 11, 8)
                 )
             },
         ),
@@ -204,7 +210,7 @@ async def test_system_health_info_aggregates_all_loaded_entries(
             totals={},
             meters={
                 second_meter.identifier: OceaMeterReading(
-                    meter=second_meter, value=0.25, latest_date="2026-11-08"
+                    meter=second_meter, value=Decimal("0.25"), latest_date=date(2026, 11, 8)
                 )
             },
         ),
@@ -252,11 +258,13 @@ async def test_system_health_tracks_real_entry_lifecycle(hass: HomeAssistant) ->
         ),
     ):
         client.return_value.get_pds.return_value = [
-            {"id": "pds-1", "fluide": "EauFroide"}
+            OceaPdsData.from_api({"id": "pds-1", "fluide": "EauFroide"})
         ]
         client.return_value.get_appareils.return_value = []
         client.return_value.get_consumptions.return_value = []
-        client.return_value.get_pds_consumption.return_value = {"consommations": []}
+        client.return_value.get_pds_consumption.return_value = OceaConsumptionSeries.from_api(
+            {"consommations": []}
+        )
 
         assert await hass.config_entries.async_setup(entry.entry_id)
         info = await system_health_info(hass)

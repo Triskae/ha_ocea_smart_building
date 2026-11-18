@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -15,6 +16,11 @@ from yarl import URL
 
 from custom_components.ocea_smart_building import PLATFORMS, async_setup_entry
 from custom_components.ocea_smart_building.const import CONF_LOCAL_ID, DOMAIN
+from custom_components.ocea_smart_building.ocea.models import (
+    OceaConsumptionSeries,
+    OceaDashboardData,
+    OceaPdsData,
+)
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -166,13 +172,15 @@ async def test_unload_removes_sensor_update_listener(hass: HomeAssistant) -> Non
     entry.add_to_hass(hass)
     with patch("custom_components.ocea_smart_building.OceaApiClient", autospec=True) as client:
         client.return_value.get_pds.return_value = [
-            {"id": "pds-1", "fluide": "EauFroide"}
+            OceaPdsData.from_api({"id": "pds-1", "fluide": "EauFroide"})
         ]
         client.return_value.get_appareils.return_value = []
         client.return_value.get_consumptions.return_value = [
-            {"fluide": "EauFroide", "valeur": "1"}
+            OceaDashboardData.from_api({"fluide": "EauFroide", "valeur": "1"})
         ]
-        client.return_value.get_pds_consumption.return_value = {"consommations": []}
+        client.return_value.get_pds_consumption.return_value = OceaConsumptionSeries.from_api(
+            {"consommations": []}
+        )
 
         assert await hass.config_entries.async_setup(entry.entry_id)
         coordinator = entry.runtime_data
@@ -184,7 +192,7 @@ async def test_unload_removes_sensor_update_listener(hass: HomeAssistant) -> Non
         data = coordinator.data
         reading = data.meters["pds-1"]
         coordinator.async_set_updated_data(
-            replace(data, meters={"pds-1": replace(reading, estimated_leak=0.1)})
+            replace(data, meters={"pds-1": replace(reading, estimated_leak=Decimal("0.1"))})
         )
         await hass.async_block_till_done()
         assert any(

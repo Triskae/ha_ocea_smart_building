@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -12,10 +14,107 @@ from custom_components.ocea_smart_building.ocea import OceaApiError, OceaMeter, 
 from custom_components.ocea_smart_building.ocea.models import (
     OccupationStatus,
     OceaAddress,
+    OceaConsumptionSeries,
+    OceaDashboardData,
     OceaDwellingDetails,
     OceaOccupation,
     OceaResident,
+    OceaRfcConsumptionData,
+    OceaWaterConsumptionData,
+    is_generic_consumption,
+    is_rfc_consumption,
+    is_water_consumption,
 )
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("12,340", Decimal("12.340")),
+        (0.25, Decimal("0.25")),
+        (5, Decimal(5)),
+        (None, None),
+        (True, None),
+        ("not-a-number", None),
+        ("Infinity", None),
+        ("NaN", None),
+    ],
+)
+def test_consumption_values_are_finite_decimals(raw, expected) -> None:
+    """Convert supported JSON numbers without inventing missing values."""
+    data = OceaConsumptionSeries.from_api({"consommations": [{"valeur": raw}]})
+    assert data.items[0].value == expected
+    assert data.raw["consommations"] == [{"valeur": raw}]
+    assert OceaDashboardData.from_api({"valeur": raw}).value == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("2026-01-02", date(2026, 1, 2)),
+        ("2026-01-02T03:04:05", datetime(2026, 1, 2, 3, 4, 5, tzinfo=ZoneInfo("Europe/Paris"))),
+        ("2026-07-02T03:04:05", datetime(2026, 7, 2, 3, 4, 5, tzinfo=ZoneInfo("Europe/Paris"))),
+        ("2026-01-02T03:04:05Z", datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)),
+        ("2026-01-02T03:04:05+02:00",
+         datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone(timedelta(hours=2)))),
+        ("2026-03-29T02:30:00", None),
+        ("2026-10-25T02:30:00", None),
+        ("invalid", None),
+        (None, None),
+        (False, None),
+    ],
+)
+def test_consumption_dates_preserve_day_or_instant(raw, expected) -> None:
+    """Preserve explicit offsets and reject ambiguous or nonexistent Paris times."""
+    data = OceaConsumptionSeries.from_api({"consommations": [{"date": raw, "valeur": 1}]})
+    assert data.items[0].date == expected
+    assert type(data.items[0].date) is type(expected)
+    if isinstance(expected, datetime) and isinstance(data.items[0].date, datetime):
+        assert data.items[0].date.utcoffset() == expected.utcoffset()
+
+
+def test_optional_consumption_numbers_are_typed_and_invalid_values_are_reported(caplog) -> None:
+    """Keep corrected values precise and do not expose invalid metadata in logs."""
+    data = {"consommations": [
+        {"type": "ConsommationRfcResponse", "valeur": 1, "valeurCoefficientee": "1,50"},
+        {"type": "ConsommationEauResponse", "valeur": 2, "fuiteEstimee": "private-value"},
+    ]}
+    series = OceaConsumptionSeries.from_api(data)
+    corrected, water = series.items
+    assert isinstance(corrected, OceaRfcConsumptionData)
+    assert corrected.corrected_value == Decimal("1.50")
+    assert isinstance(water, OceaWaterConsumptionData)
+    assert water.estimated_leak is None
+    assert "Invalid optional consumption value" in caplog.text
+    assert "private-value" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("item", "expected"),
+    [
+        ({"type": "ConsommationResponse", "isEstimated": True}, (True, False, False)),
+        ({"type": "ConsommationEauResponse", "fuiteEstimee": None}, (False, True, False)),
+        (
+            {"type": "ConsommationRfcResponse", "valeurCoefficientee": "1,5",
+             "emplacement": "synthetic"},
+            (False, False, True),
+        ),
+        ({"type": "ConsommationRfcResponse", "valeurCoefficientee": None}, (False, False, True)),
+        ({"type": "ConsommationRfcResponse", "valeurCoefficientee": True}, (False, False, False)),
+        ({"type": "ConsommationRfcResponse", "emplacement": 42}, (False, False, False)),
+        ({"type": "ConsommationEauResponse", "isEstimated": "unknown"}, (False, False, False)),
+        ({"type": "FutureResponse"}, (False, False, False)),
+        ({}, (False, False, False)),
+        ({"type": None}, (False, False, False)),
+    ],
+)
+def test_consumption_variant_guards(item, expected) -> None:
+    """Only refine a variant when its discriminator and typed fields are valid."""
+    assert (
+        is_generic_consumption(item),
+        is_water_consumption(item),
+        is_rfc_consumption(item),
+    ) == expected
 
 
 def test_pds_model_maps_ocea_response() -> None:
@@ -110,10 +209,10 @@ def test_meter_reading_keeps_consumption_metadata() -> None:
 
     reading = OceaMeterReading(
         meter=meter,
-        value=0.321,
-        latest_date="2026-09-15",
+        value=Decimal("0.321"),
+        latest_date=date(2026, 9, 15),
         unit="m3",
-        estimated_leak=0.0,
+        estimated_leak=Decimal(0),
         consent=True,
         response_type="ConsommationEauResponse",
     )

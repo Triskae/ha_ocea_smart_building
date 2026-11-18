@@ -72,4 +72,4 @@ class OceaLeakBinarySensor(OceaEntity, BinarySensorEntity):
         reading = self._reading
         if reading is None or reading.estimated_leak is None:
             return None
-        return float(str(reading.estimated_leak).replace(",", ".")) > 0
+        return reading.estimated_leak > 0
