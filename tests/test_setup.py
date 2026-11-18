@@ -11,6 +11,7 @@ from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from yarl import URL
 
 from custom_components.ocea_smart_building import PLATFORMS, async_setup_entry
 from custom_components.ocea_smart_building.const import CONF_LOCAL_ID, DOMAIN
@@ -143,6 +144,9 @@ async def test_session_is_detached_after_entry_unload(hass: HomeAssistant) -> No
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         session = client_class.call_args.kwargs["session"]
+        url = URL("https://login.example.test/")
+        session.cookie_jar.update_cookies({"csrf": "test=="}, response_url=url)
+        assert session.cookie_jar.filter_cookies(url)["csrf"].coded_value == "test=="
         assert not session.closed
         assert await hass.config_entries.async_unload(entry.entry_id)
         assert session.closed
