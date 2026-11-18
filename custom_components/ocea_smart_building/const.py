@@ -1,7 +1,7 @@
 """Constants for the Ocea Smart Building integration."""
 
 DOMAIN = "ocea_smart_building"
-INTEGRATION_VERSION = "1.2.0"
+INTEGRATION_VERSION = "1.2.1"
 
 UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
