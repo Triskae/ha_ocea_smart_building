@@ -115,6 +115,44 @@ so Home Assistant can synchronize the meter entities.
 See [docs/architecture.md](docs/architecture.md) for module responsibilities,
 data flow, and contributor-facing design invariants.
 
+### Manual consumption explorer
+
+The standalone CLI uses Python and `requests`, without Home Assistant:
+
+Run the following commands in Bash. If your terminal uses another shell, such
+as zsh, run `bash` first; the password prompt below uses Bash-specific options.
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install requests
+read -r -s -p "Ocea password: " OCEA_PASSWORD; echo
+.venv/bin/python ocea_cli.py --email "YOUR_EMAIL" --password "$OCEA_PASSWORD" --verbose
+unset OCEA_PASSWORD
+```
+
+Replace `YOUR_EMAIL` with your Ocea login. The password is not typed into shell
+history, but it can be visible to other users through the process arguments
+while the command runs. Use a trusted machine.
+
+The CLI displays dashboard totals and queries every measurement point (PDS)
+of the first dwelling, including heating and other fluids. By default it
+requests daily granularity from the start of the current month through today.
+To choose an inclusive interval, add both `--start-date YYYY-MM-DD` and
+`--end-date YYYY-MM-DD`. The default dates use the machine's local calendar;
+the API request expresses each bound at the start or end of the day in UTC.
+`--verbose` adds sanitized request traces.
+
+The API may return no readings or readings spaced by months even when `Day` is
+requested; the CLI displays only what Ocea actually returns. Daily readings
+are available the following day, so today and future dates are excluded when
+checking for missing readings. A failed PDS is reported without stopping the
+others, and causes a nonzero exit status.
+This tool does not import historical data into Home Assistant.
+
+Dates and consumption values are private even when PDS identifiers are omitted.
+Review and anonymize output before sharing it. Do not share token output:
+`--dump-tokens` deliberately displays parts of the authentication tokens.
+
 ### Reconfiguration
 
 Open Settings → Devices & Services → Ocea Smart Building, then select the native **Reconfigure** action.

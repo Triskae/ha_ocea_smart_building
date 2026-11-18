@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CLI script to authenticate with Ocea Smart Building and fetch water consumption.
+CLI script to authenticate with Ocea Smart Building and explore consumption.
 
 Usage:
     python3 ocea_cli.py --email your@email.com --password yourpass
@@ -18,7 +18,10 @@ import json
 import logging
 import re
 import secrets
-from urllib.parse import parse_qs, urlparse
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
+from itertools import pairwise
+from urllib.parse import parse_qs, quote, urlparse
 
 import requests
 
@@ -101,27 +104,20 @@ def authenticate(
     html = resp.text
     final_url = resp.url
 
-    # Debug cookies
-    for name, value in session.cookies.items():
-        log.debug("  Cookie: %s = %s…", name, value[:60])
-
     # CSRF from cookie
     csrf = session.cookies.get("x-ms-cpim-csrf")
     if not csrf:
         log.error("No x-ms-cpim-csrf cookie found!")
-        log.error("All cookies: %s", dict(session.cookies))
         raise SystemExit(1)
     log.info("  ✓ Got CSRF from cookie")
-    log.debug("  csrf=%s…", csrf[:50])
 
     # transId from HTML
     trans_match = re.search(r'"transId"\s*:\s*"([^"]+)"', html)
     if not trans_match:
-        log.error("Could not find transId. HTML snippet:\n%s", html[:3000])
+        log.error("Could not find transId in the login page")
         raise SystemExit(1)
     trans_id = trans_match.group(1)
     log.info("  ✓ Got transId from HTML")
-    log.debug("  transId=%s", trans_id)
 
     # ── Step 2: POST credentials ──────────────────────────────────────────
     log.info("Step 2/4 — Posting credentials...")
@@ -132,8 +128,6 @@ def authenticate(
         f"/B2C_1A_SIGNUP_SIGNIN/SelfAsserted"
         f"?tx={trans_id}&p=B2C_1A_SIGNUP_SIGNIN"
     )
-
-    log.debug("  URL: %s", self_asserted_url)
 
     # Use a PreparedRequest to control exactly what gets sent
     req = requests.Request(
@@ -164,20 +158,12 @@ def authenticate(
     )
     prepared = session.prepare_request(req)
 
-    # Log the exact request being sent
-    log.debug("  Prepared URL: %s", prepared.url)
-    log.debug("  Prepared headers: %s", dict(prepared.headers))
-    log.debug("  Prepared body: %s",
-              prepared.body.replace(password, "***") if prepared.body else "(empty)")
-
     resp = session.send(prepared, allow_redirects=False)
 
     log.debug("  SelfAsserted HTTP %d", resp.status_code)
-    log.debug("  Response headers: %s", dict(resp.headers))
-    log.debug("  Response body: %s", resp.text[:500])
 
     if resp.status_code != 200:
-        log.error("Login failed — HTTP %d:\n%s", resp.status_code, resp.text[:500])
+        log.error("Login failed — HTTP %d", resp.status_code)
         raise SystemExit(1)
 
     try:
@@ -185,10 +171,12 @@ def authenticate(
     except json.JSONDecodeError:
         result = {}
 
+    if not isinstance(result, dict):
+        log.error("Invalid login response")
+        raise SystemExit(1)
     status = result.get("status")
     if status and str(status) != "200":
-        msg = result.get("message", resp.text[:200])
-        log.error("Login rejected (status=%s): %s", status, msg)
+        log.error("Login rejected")
         raise SystemExit(1)
 
     log.info("  ✓ Credentials accepted")
@@ -210,10 +198,8 @@ def authenticate(
 
     location = resp.headers.get("Location", "")
     log.debug("  Confirmed HTTP %d", resp.status_code)
-    log.debug("  Location: %s", location[:200] if location else "(empty)")
-
     if not location:
-        log.error("No redirect (HTTP %d):\n%s", resp.status_code, resp.text[:500])
+        log.error("No redirect (HTTP %d)", resp.status_code)
         raise SystemExit(1)
 
     # Parse code from fragment
@@ -224,15 +210,14 @@ def authenticate(
         code = fparams.get("code", [None])[0]
         error = fparams.get("error", [None])[0]
         if error:
-            log.error("B2C error: %s — %s",
-                      error, fparams.get("error_description", [""])[0])
+            log.error("B2C authorization failed")
             raise SystemExit(1)
     if not code:
         qparams = parse_qs(urlparse(location).query)
         code = qparams.get("code", [None])[0]
 
     if not code:
-        log.error("No auth code in redirect:\n  %s", location[:300])
+        log.error("No auth code in redirect")
         raise SystemExit(1)
 
     log.info("  ✓ Got authorization code (%d chars)", len(code))
@@ -260,16 +245,25 @@ def authenticate(
     )
 
     if resp.status_code != 200:
-        log.error("Token exchange failed — HTTP %d:\n%s",
-                  resp.status_code, resp.text[:500])
+        log.error("Token exchange failed — HTTP %d", resp.status_code)
         raise SystemExit(1)
 
-    tokens = resp.json()
+    try:
+        tokens = resp.json()
+    except requests.exceptions.JSONDecodeError:
+        log.error("Invalid token response")
+        raise SystemExit(1) from None
+    if not isinstance(tokens, dict):
+        log.error("Invalid token response")
+        raise SystemExit(1)
     access_token = tokens.get("access_token")
     refresh_token = tokens.get("refresh_token")
 
-    if not access_token:
-        log.error("No access_token: %s", json.dumps(tokens, indent=2)[:500])
+    if not isinstance(access_token, str) or not access_token:
+        log.error("No access_token in token response")
+        raise SystemExit(1)
+    if refresh_token is not None and not isinstance(refresh_token, str):
+        log.error("Invalid refresh token in token response")
         raise SystemExit(1)
 
     log.info("  ✓ Got access_token (%d chars) + refresh_token (%s)",
@@ -281,14 +275,21 @@ def authenticate(
 
 # ─── API helpers ──────────────────────────────────────────────────────────────
 
-def api_get(
+class OceaCliError(Exception):
+    """An API error safe to display without account details."""
+
+
+def api_request(
     session: requests.Session,
     access_token: str,
+    method: str,
     path: str,
-) -> requests.Response:
-    """Make an authenticated GET request, return raw response."""
+    payload: dict[str, str] | None = None,
+) -> object:
+    """Make an authenticated API request without exposing response bodies."""
     url = f"{API_BASE}{path}"
-    return session.get(
+    response = session.request(
+        method,
         url,
         headers={
             "Authorization": f"Bearer {access_token}",
@@ -297,7 +298,16 @@ def api_get(
             "Referer": f"{B2C_REDIRECT_URI}/",
             "User-Agent": UA,
         },
+        json=payload,
+        timeout=30,
     )
+    log.debug("API %s returned HTTP %d", method, response.status_code)
+    if response.status_code != 200:
+        raise OceaCliError(f"HTTP {response.status_code}")
+    try:
+        return response.json()
+    except requests.exceptions.JSONDecodeError:
+        raise OceaCliError("Invalid JSON response") from None
 
 
 def fetch_resident(
@@ -305,11 +315,11 @@ def fetch_resident(
     access_token: str,
 ) -> dict:
     """Fetch resident info including occupations (logementId)."""
-    resp = api_get(session, access_token, "/api/v1/resident")
-    if resp.status_code != 200:
-        log.error("Resident API failed — HTTP %d:\n%s", resp.status_code, resp.text[:500])
-        raise SystemExit(1)
-    return resp.json()
+    log.debug("Requesting resident occupations")
+    result = api_request(session, access_token, "GET", "/api/v1/resident")
+    if not isinstance(result, dict):
+        raise OceaCliError("Invalid resident response")
+    return result
 
 
 def fetch_consumptions(
@@ -317,86 +327,254 @@ def fetch_consumptions(
     access_token: str,
     local_id: str,
 ) -> list[dict]:
-    resp = api_get(session, access_token, f"/api/v1/local/{local_id}/dashboard/consos")
-    if resp.status_code != 200:
-        log.error("API failed — HTTP %d:\n%s", resp.status_code, resp.text[:500])
-        raise SystemExit(1)
-    return resp.json()
+    log.debug("Requesting dashboard totals")
+    result = api_request(
+        session, access_token, "GET",
+        f"/api/v1/local/{quote(local_id, safe='')}/dashboard/consos",
+    )
+    if not isinstance(result, list) or not all(isinstance(item, dict) for item in result):
+        raise OceaCliError("Invalid dashboard response")
+    return result
+
+
+def fetch_pds(session: requests.Session, access_token: str, local_id: str) -> list:
+    """Discover all measurement points for the selected dwelling."""
+    log.debug("Discovering measurement points")
+    result = api_request(
+        session, access_token, "GET", f"/api/v1/local/{quote(local_id, safe='')}/pds"
+    )
+    if not isinstance(result, list):
+        raise OceaCliError("Invalid PDS response")
+    return result
+
+
+def fetch_pds_consumption(
+    session: requests.Session,
+    access_token: str,
+    local_id: str,
+    pds_id: str,
+    payload: dict[str, str],
+) -> object:
+    """Fetch the requested daily-granularity readings for one PDS."""
+    return api_request(
+        session,
+        access_token,
+        "POST",
+        f"/api/v1/local/{quote(local_id, safe='')}/pds/{quote(pds_id, safe='')}/conso",
+        payload,
+    )
+
+
+def date_argument(value: str) -> date:
+    """Parse an ISO calendar date supplied on the command line."""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise argparse.ArgumentTypeError("Use YYYY-MM-DD")
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("Invalid calendar date") from None
+
+
+def period_payload(start: date, end: date) -> dict[str, str]:
+    """Build inclusive daily-granularity bounds in the portal's format."""
+    return {
+        "debut": f"{start.isoformat()}T00:00:00.000Z",
+        "fin": f"{end.isoformat()}T23:59:59.999Z",
+        "granularity": "Day",
+    }
+
+
+def display_number(value: object) -> str:
+    """Validate a reading without printing arbitrary API strings."""
+    if value is None:
+        return "unavailable"
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise OceaCliError("Invalid consumption value")
+    try:
+        number = Decimal(str(value).replace(",", "."))
+    except InvalidOperation:
+        raise OceaCliError("Invalid consumption value") from None
+    if not number.is_finite():
+        raise OceaCliError("Invalid consumption value")
+    return str(number)
+
+
+def display_unit(value: object) -> str:
+    """Display recognized units without emitting arbitrary API data."""
+    return value if isinstance(value, str) and value in (
+        "m3", "m³", "kWh", "MWh", "Wh", "kW", "L", "l", "U", "°C", "%"
+    ) else "unknown unit"
+
+
+def display_consumptions(response: object, start: date, end: date, today: date) -> None:
+    """Display actual readings without assuming the API honored the granularity."""
+    if not isinstance(response, dict) or not isinstance(response.get("consommations"), list):
+        raise OceaCliError("Invalid consumption response")
+    unit = display_unit(response.get("unite"))
+    items = response["consommations"]
+    log.debug("Received %d consumption readings", len(items))
+    if not items:
+        if start >= today:
+            print("  No completed days in this period; daily readings are available the following day.")
+        else:
+            print("  No readings returned for this period.")
+        return
+    readings = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise OceaCliError("Invalid consumption item")
+        raw_date = item.get("date")
+        if not isinstance(raw_date, str) or not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})?)?",
+            raw_date,
+        ):
+            raise OceaCliError("Invalid consumption date")
+        try:
+            reading_date = datetime.fromisoformat(raw_date).date()
+        except ValueError:
+            raise OceaCliError("Invalid consumption date") from None
+        value = display_number(item.get("valeur"))
+        extras = []
+        for key, label in (("valeurCoefficientee", "corrected"), ("fuiteEstimee", "estimated leak")):
+            if key in item:
+                extras.append(f"{label}: {display_number(item[key])} {unit}")
+        for key, label in (("isEstimated", "estimated"), ("consentement", "consent")):
+            if key in item:
+                if not isinstance(item[key], bool):
+                    raise OceaCliError("Invalid consumption metadata")
+                extras.append(f"{label}: {'yes' if item[key] else 'no'}")
+        if "type" in item:
+            response_type = item["type"]
+            if response_type not in (
+                "ConsommationResponse", "ConsommationEauResponse", "ConsommationRfcResponse"
+            ):
+                response_type = "other"
+            extras.append(f"type: {response_type}")
+        readings.append((reading_date, raw_date, value, extras))
+    for _, raw_date, value, extras in readings:
+        detail = f" ({', '.join(extras)})" if extras else ""
+        print(f"  {raw_date}: {value} {unit}{detail}")
+    dates = sorted({reading[0] for reading in readings if start <= reading[0] <= end})
+    completed_end = min(end, today - timedelta(days=1))
+    expected_days = max(0, (completed_end - start).days + 1)
+    if sum(day <= completed_end for day in dates) < expected_days:
+        print("  Some dates in the requested period have no reading; the cause is unknown.")
+    if len(dates) >= 2 and all(day.day == 1 for day in dates) and all(
+        (right - left).days >= 28 for left, right in pairwise(dates)
+    ):
+        print("  Returned dates appear monthly; daily availability is not confirmed.")
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
-def main(args: argparse.Namespace) -> None:
-    session = requests.Session()
+def fluid_label(value: object) -> str:
+    """Display known fluids without emitting arbitrary account data."""
+    return {
+        "EauFroide": "Cold water",
+        "EauChaude": "Hot water",
+        "Cetc": "Heating (CETC)",
+        "CETC": "Heating (CETC)",
+        "Cetf": "Cooling (CETF)",
+        "Rfc": "Heating allocation (RFC)",
+        "Gaz": "Gas",
+        "Electricite": "Electricity",
+        "Fioul": "Fuel oil",
+        "Temperature": "Temperature",
+        "Hygrometrie": "Humidity",
+        "Air": "Air",
+        "DeltaP": "Pressure difference",
+        "CO2": "CO2",
+        "Horaire": "Operating time",
+    }.get(value, "Other fluid") if isinstance(value, str) else "Other fluid"
 
-    tokens = authenticate(session, args.email, args.password)
 
-    print("\n" + "=" * 60)
-    print("AUTH OK")
-    print("=" * 60)
+def main(args: argparse.Namespace) -> int:
+    """Display dashboard totals and explore all PDS in the first dwelling."""
+    today = datetime.now(timezone.utc).astimezone().date()
+    start = args.start_date or today.replace(day=1)
+    end = args.end_date or today
+    payload = period_payload(start, end)
 
-    if args.dump_tokens:
-        print("\naccess_token:")
-        print(tokens["access_token"][:80] + "…")
-        if tokens.get("refresh_token"):
-            print("\nrefresh_token:")
-            print(tokens["refresh_token"][:80] + "…")
+    with requests.Session() as session:
+        tokens = authenticate(session, args.email, args.password)
+        access_token = tokens["access_token"]
+        print("\nAUTH OK")
+        if args.dump_tokens:
+            print("\naccess_token:")
+            print(access_token[:80] + "…")
+            if tokens.get("refresh_token"):
+                print("\nrefresh_token:")
+                print(tokens["refresh_token"][:80] + "…")
 
-    # Auto-discover local_id from /api/v1/resident
-    resident_data = fetch_resident(session, tokens["access_token"])
+        resident_data = fetch_resident(session, access_token)
+        occupations = resident_data.get("occupations")
+        if not isinstance(occupations, list) or not occupations or not isinstance(occupations[0], dict):
+            raise OceaCliError("No valid occupation found for this account")
+        local_id = occupations[0].get("logementId")
+        if not isinstance(local_id, (str, int)) or isinstance(local_id, bool) or not str(local_id):
+            raise OceaCliError("No dwelling identifier in the first occupation")
+        local_id = str(local_id)
+        if len(occupations) > 1:
+            print(f"Found {len(occupations)} occupations; using the first one.")
 
-    resident = resident_data.get("resident", {})
-    prenom = resident.get("prenom", "?")
-    nom = resident.get("nom", "?")
-    print(f"\nResident: {prenom} {nom}")
+        failed = False
+        print("\nDashboard totals:")
+        try:
+            for item in fetch_consumptions(session, access_token, local_id):
+                unit = display_unit(item.get("unite"))
+                print(f"  {fluid_label(item.get('fluide'))}: {display_number(item.get('valeur'))} {unit}")
+        except OceaCliError as err:
+            log.error("Dashboard: %s", err)
+            failed = True
+        except requests.RequestException:
+            log.error("Dashboard: network request failed")
+            failed = True
 
-    occupations = resident_data.get("occupations", [])
-    if not occupations:
-        log.error("No occupations found for this account!")
-        raise SystemExit(1)
-
-    local_id = str(occupations[0].get("logementId", ""))
-    if not local_id:
-        log.error("No logementId in first occupation!")
-        raise SystemExit(1)
-
-    print(f"Local ID: {local_id}")
-
-    if len(occupations) > 1:
-        print(f"\nNote: {len(occupations)} occupations found, using the first one.")
-        for i, occ in enumerate(occupations):
-            print(f"  [{i}] logementId={occ.get('logementId')} — {occ.get('adresse', '?')}")
-
-    print(f"\nFetching consumption for local_id={local_id}…\n")
-    data = fetch_consumptions(session, tokens["access_token"], local_id)
-
-    print(json.dumps(data, indent=2, ensure_ascii=False))
-
-    print("\n" + "─" * 40)
-    for item in data:
-        fluide = item.get("fluide", "?")
-        valeur = item.get("valeur", "?")
-        unite = item.get("unite", "?")
-        label = (
-            "🔵 Eau froide" if fluide == "EauFroide"
-            else "🔴 Eau chaude" if fluide == "EauChaude"
-            else "🔥 Chauffage thermique" if fluide == "CETC"
-            else fluide
-        )
-        print(f"  {label}: {valeur} {unite}")
-    print("─" * 40)
+        pds_list = fetch_pds(session, access_token, local_id)
+        print(f"\nRequested daily granularity: {start.isoformat()} to {end.isoformat()} (inclusive).")
+        print("Consumption dates and values are private; review them before sharing.")
+        if not pds_list:
+            print("No PDS found for this dwelling.")
+        for index, pds in enumerate(pds_list, 1):
+            print(f"\nPDS {index}: {fluid_label(pds.get('fluide')) if isinstance(pds, dict) else 'unknown fluid'}")
+            if not isinstance(pds, dict):
+                log.error("PDS %d: invalid PDS data", index)
+                failed = True
+                continue
+            pds_id = pds.get("id")
+            if not isinstance(pds_id, (str, int)) or isinstance(pds_id, bool) or not str(pds_id):
+                log.error("PDS %d: missing identifier", index)
+                failed = True
+                continue
+            try:
+                log.debug("PDS %d: requesting daily-granularity consumption", index)
+                response = fetch_pds_consumption(session, access_token, local_id, str(pds_id), payload)
+                display_consumptions(response, start, end, today)
+            except OceaCliError as err:
+                log.error("PDS %d: %s", index, err)
+                failed = True
+            except requests.RequestException:
+                log.error("PDS %d: network request failed", index)
+                failed = True
+        return int(failed)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Fetch water consumption from Ocea Smart Building",
+        description="Explore Ocea Smart Building consumption by measurement point",
     )
     parser.add_argument("--email", required=True)
     parser.add_argument("--password", required=True)
     parser.add_argument("--dump-tokens", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument("--start-date", type=date_argument, help="First date, inclusive (YYYY-MM-DD)")
+    parser.add_argument("--end-date", type=date_argument, help="Last date, inclusive (YYYY-MM-DD)")
 
     args = parser.parse_args()
+    if (args.start_date is None) != (args.end_date is None):
+        parser.error("--start-date and --end-date must be provided together")
+    if args.start_date is not None and args.start_date > args.end_date:
+        parser.error("--start-date must not be after --end-date")
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -404,4 +582,13 @@ if __name__ == "__main__":
         datefmt="%H:%M:%S",
     )
 
-    main(args)
+    logging.getLogger("urllib3").setLevel(logging.CRITICAL + 1)
+
+    try:
+        raise SystemExit(main(args))
+    except OceaCliError as err:
+        log.error("Ocea API: %s", err)
+        raise SystemExit(1) from None
+    except requests.RequestException:
+        log.error("Network request failed")
+        raise SystemExit(1) from None
