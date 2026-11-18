@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 
 import voluptuous as vol
-from aiohttp import ClientError
+from aiohttp import ClientError, CookieJar
 from homeassistant.config_entries import ConfigFlow
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.data_entry_flow import AbortFlow, FlowResult
@@ -94,7 +94,10 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             self._abort_if_unique_id_configured()
 
             session = async_create_clientsession(
-                self.hass, auto_cleanup=False, connector_owner=False
+                self.hass,
+                auto_cleanup=False,
+                connector_owner=False,
+                cookie_jar=CookieJar(quote_cookie=False),
             )
             client = OceaApiClient(
                 email=user_input[CONF_EMAIL],
@@ -213,7 +216,10 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             reauth_entry = self._get_reauth_entry()
             session = async_create_clientsession(
-                self.hass, auto_cleanup=False, connector_owner=False
+                self.hass,
+                auto_cleanup=False,
+                connector_owner=False,
+                cookie_jar=CookieJar(quote_cookie=False),
             )
             client = OceaApiClient(
                 email=user_input[CONF_EMAIL],
@@ -295,7 +301,10 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                 password = reconfigure_entry.data[CONF_PASSWORD]
 
             session = async_create_clientsession(
-                self.hass, auto_cleanup=False, connector_owner=False
+                self.hass,
+                auto_cleanup=False,
+                connector_owner=False,
+                cookie_jar=CookieJar(quote_cookie=False),
             )
             client = OceaApiClient(
                 email=email,

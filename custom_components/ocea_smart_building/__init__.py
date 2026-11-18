@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from aiohttp import CookieJar
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
@@ -19,7 +20,12 @@ PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 async def async_setup_entry(hass: HomeAssistant, entry: OceaConfigEntry) -> bool:
     """Set up Ocea Smart Building from a config entry."""
-    session = async_create_clientsession(hass, auto_cleanup=False, connector_owner=False)
+    session = async_create_clientsession(
+        hass,
+        auto_cleanup=False,
+        connector_owner=False,
+        cookie_jar=CookieJar(quote_cookie=False),
+    )
     client = OceaApiClient(
         email=entry.data[CONF_EMAIL],
         password=entry.data[CONF_PASSWORD],
