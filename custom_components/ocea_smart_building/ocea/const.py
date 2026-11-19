@@ -1,5 +1,9 @@
 """Ocea resident API protocol constants."""
 
+from zoneinfo import ZoneInfo
+
+OCEA_TIME_ZONE = ZoneInfo("Europe/Paris")
+
 # Azure AD B2C
 B2C_TENANT = "osbespaceresident"
 B2C_CLIENT_ID = "1cacfb15-0b3c-42cc-a662-736e4737e7d9"

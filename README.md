@@ -99,6 +99,11 @@ action:
 The integration polls Ocea every five hours. Leak detection therefore follows
 that refresh interval and is not real-time.
 
+If Ocea returns an invalid or incomplete dated reading, the integration skips
+it and logs a warning. A meter's resulting total may be incomplete and may
+affect Home Assistant's consumption statistics. If every returned reading is
+invalid, that meter's consumption is unavailable instead of reported as zero.
+
 For example, the individual meter sensors can help compare consumption between
 rooms, while the dwelling totals can be tracked in the Energy dashboard.
 
@@ -200,6 +205,12 @@ logger:
   logs:
     custom_components.ocea_smart_building: debug
 ```
+
+The integration's debug messages summarize API response shapes, types and
+selected formats without logging account data or measurement values. Unknown
+field names are replaced by temporary per-client fingerprints, so they cannot
+be recovered from the logs. Other Home Assistant components may log different
+information; review logs before sharing them.
 
 ## Removing the integration
 

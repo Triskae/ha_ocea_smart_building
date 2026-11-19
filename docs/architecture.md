@@ -83,7 +83,45 @@ Home Assistant lifecycle and presentation concerns stay in the integration
 modules. The `ocea/` package owns Ocea HTTP requests, response-shape validation,
 authentication, API models, and client exceptions. Resident information and
 dwelling details, including structured addresses, are converted to typed
-models at the client boundary. Address formatting belongs to the config flow.
+models at the client boundary. JSON request and response contracts also live
+in `ocea/models.py`; known fields used by the coordinator are validated and
+converted to model attributes at the client boundary. Additional fields are
+retained in the models' raw data, which must never be logged. The models do
+not represent a complete server schema. Address formatting belongs to the
+config flow.
+
+For dated consumption items, the client distinguishes generic, water and RFC
+responses using `type`; only the water variant declares `fuiteEstimee`.
+The client also retains an unclassified shape for missing, unknown or
+incompletely understood variants. Type guards check the discriminator and
+variant fields before constructing the typed models, without rejecting
+previously accepted data.
+Legacy leak fields remain usable even when the discriminator is missing.
+
+Dashboard and consumption values are converted to finite `Decimal` values at
+the API boundary. Dated readings use `date` for calendar-only dates and
+timezone-aware `datetime` for timestamps. Explicit offsets are preserved;
+naive timestamps are interpreted in `Europe/Paris`. Ambiguous or nonexistent
+local times are invalid rather than guessed. When the latest calendar-only
+reading cannot be ordered against a timestamp on the same Paris day, its
+latest-reading metadata is unavailable.
+
+The coordinator ignores individual consumption readings with invalid or
+missing dates or values, warns without logging their contents, and aggregates
+the remaining values. A partial total can understate actual consumption; a
+nonempty series with no valid readings is unavailable. An empty series keeps
+its existing behavior. Latest-reading metadata is unavailable when an invalid
+date prevents ordering or the latest reading is invalid, so a stale leak
+estimate cannot be reported as current. Numeric values are converted to floats
+at the sensor boundary to preserve Home Assistant's exposed values. The dashboard accepts
+the exact API fluid code `Cetc` for the existing `cetc` sensor; unsupported
+fluid codes are ignored with a sanitized warning.
+
+The client owns authentication state but is not bound to a dwelling. Each
+dwelling-specific call receives its local ID explicitly, and POST methods
+receive their complete typed payload from the caller. Dynamic URL segments are
+encoded independently. The coordinator constructs the device and consumption
+requests for the configured dwelling.
 
 ## Runtime flow
 
@@ -140,6 +178,12 @@ in `test_config_flow.py` and `test_setup.py`; coordinator and sensor behavior in
   held by the client in memory. Never put credentials, tokens, cookies,
   resident/dwelling identifiers, or authenticated API responses in logs,
   documentation, fixtures, or committed output.
+- Debug response summaries contain only known field paths, JSON types, bounded
+  list lengths, selected format categories, and explicitly allowlisted
+  non-sensitive codes. Unknown keys are represented by keyed, per-client
+  ephemeral fingerprints and their value's type, never their names or values.
+  Their names cannot be recovered from these summaries. The traversal is
+  bounded and only runs when debug logging is enabled.
 - Entity unique IDs are derived from the dwelling and, for meter entities, the
   PDS identifier. Changing this scheme can orphan existing entities; treat it
   as a migration, not a cosmetic refactor.

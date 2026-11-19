@@ -24,3 +24,8 @@ WATER_FLUID_SENSOR_KEYS: dict[str, str] = {
     "EauFroide": "eau_froide",
     "EauChaude": "eau_chaude",
 }
+
+DASHBOARD_FLUID_SENSOR_KEYS: dict[str, str] = {
+    **WATER_FLUID_SENSOR_KEYS,
+    "Cetc": "cetc",
+}

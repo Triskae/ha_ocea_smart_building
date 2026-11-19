@@ -190,7 +190,8 @@ class OceaWaterSensor(OceaEntity, SensorEntity):
         """Return the sensor value."""
         if self.coordinator.data is None:
             return None
-        return self.coordinator.data.totals.get(self.entity_description.data_key)
+        value = self.coordinator.data.totals.get(self.entity_description.data_key)
+        return float(value) if value is not None else None
 
 
 class OceaMeterSensor(OceaWaterSensor):
@@ -219,4 +220,5 @@ class OceaMeterSensor(OceaWaterSensor):
         reading = self.coordinator.data.meters.get(self._meter.identifier)
         if reading is None:
             return None
-        return reading.estimated_leak if self.entity_description.key == "fuite" else reading.value
+        value = reading.estimated_leak if self.entity_description.key == "fuite" else reading.value
+        return float(value) if value is not None else None

@@ -226,7 +226,6 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                 user_agent=UA,
                 session=session,
                 password=user_input[CONF_PASSWORD],
-                local_id=reauth_entry.data[CONF_LOCAL_ID],
             )
 
             try:
@@ -311,7 +310,6 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                 user_agent=UA,
                 session=session,
                 password=password,
-                local_id=reconfigure_entry.data[CONF_LOCAL_ID],
             )
 
             try:

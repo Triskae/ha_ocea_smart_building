@@ -9,7 +9,7 @@ from homeassistant.const import CONF_EMAIL, CONF_PASSWORD, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
-from .const import CONF_LOCAL_ID, UA
+from .const import UA
 from .coordinator import OceaConfigEntry, OceaDataUpdateCoordinator
 from .ocea import OceaApiClient
 
@@ -29,7 +29,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: OceaConfigEntry) -> bool
     client = OceaApiClient(
         email=entry.data[CONF_EMAIL],
         password=entry.data[CONF_PASSWORD],
-        local_id=entry.data[CONF_LOCAL_ID],
         user_agent=UA,
         session=session,
     )

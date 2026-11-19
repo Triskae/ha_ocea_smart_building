@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
 
@@ -15,9 +16,11 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.typing import UNDEFINED
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ocea_smart_building.const import DOMAIN
+from custom_components.ocea_smart_building.const import CONF_LOCAL_ID, DOMAIN
 from custom_components.ocea_smart_building.coordinator import (
+    OceaData,
     OceaDataUpdateCoordinator,
+    OceaMeterReading,
     _as_update_error,
     _build_meter_data,
     _current_month_payload,
@@ -28,12 +31,22 @@ from custom_components.ocea_smart_building.ocea import (
     OceaAuthError,
     OceaMeter,
 )
-from custom_components.ocea_smart_building.sensor import SENSOR_TYPES, OceaMeterSensor
+from custom_components.ocea_smart_building.ocea.models import (
+    OceaConsumptionSeries,
+    OceaDashboardData,
+    OceaDeviceData,
+    OceaPdsData,
+)
+from custom_components.ocea_smart_building.sensor import (
+    SENSOR_TYPES,
+    OceaMeterSensor,
+    OceaWaterSensor,
+)
 
 
 def _coordinator(hass: HomeAssistant, client: Mock) -> OceaDataUpdateCoordinator:
     """Create a coordinator bound to an actual config entry."""
-    entry = MockConfigEntry(domain=DOMAIN)
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local-123"})
     entry.add_to_hass(hass)
     coordinator = OceaDataUpdateCoordinator(hass, client, entry)
     assert coordinator.config_entry is entry
@@ -76,17 +89,19 @@ def test_meter_data_builder_aggregates_one_meter_response() -> None:
 
     assert _build_meter_data(
         meter,
-        {
+        OceaConsumptionSeries.from_api({
             "consommations": [
                 {"date": "2026-09-01", "valeur": "0,321"},
                 {"date": "2026-09-15", "valeur": 0.654},
             ]
-        },
-    ).value == 0.975
+        }),
+    ).value == Decimal("0.975")
     assert _build_meter_data(
         meter,
-        {"consommations": [{"date": "2026-09-15", "valeur": 0.654}]},
-    ).latest_date == "2026-09-15"
+        OceaConsumptionSeries.from_api(
+            {"consommations": [{"date": "2026-09-15", "valeur": 0.654}]}
+        ),
+    ).latest_date == date(2026, 9, 15)
 
 
 def test_current_month_payload_uses_requested_calendar_date() -> None:
@@ -111,10 +126,10 @@ async def test_coordinator_uses_home_assistant_timezone(
     client = AsyncMock(spec=OceaApiClient)
     client.get_consumptions.return_value = []
     client.get_pds.return_value = [
-        {"id": "pds-cold-1", "fluide": "EauFroide"},
+        OceaPdsData.from_api({"id": "pds-cold-1", "fluide": "EauFroide"}),
     ]
     client.get_appareils.return_value = []
-    client.get_pds_consumption.return_value = {"consommations": []}
+    client.get_pds_consumption.return_value = OceaConsumptionSeries.from_api({"consommations": []})
     coordinator = _coordinator(hass, client)
 
     with patch(
@@ -124,17 +139,17 @@ async def test_coordinator_uses_home_assistant_timezone(
         await coordinator._async_setup()
         await coordinator._async_update_data()
 
-    payload = client.get_pds_consumption.call_args.args[1]
+    payload = client.get_pds_consumption.call_args.args[2]
     assert payload["debut"] == "2026-09-01T00:00:00.000Z"
 
 
 async def test_coordinator_normalizes_cetc_consumption(hass: HomeAssistant) -> None:
-    """Test raw CETC consumption is normalized for the heating sensor."""
+    """Test the Cetc API code is normalized for the heating sensor."""
     client = AsyncMock(spec=OceaApiClient)
     client.get_consumptions.return_value = [
-        {"fluide": "EauFroide", "valeur": "12,34"},
-        {"fluide": "EauChaude", "valeur": "5,67"},
-        {"fluide": "CETC", "valeur": "89,01"},
+        OceaDashboardData.from_api({"fluide": "EauFroide", "valeur": "12,34"}),
+        OceaDashboardData.from_api({"fluide": "EauChaude", "valeur": "5,67"}),
+        OceaDashboardData.from_api({"fluide": "Cetc", "valeur": "89,01"}),
     ]
     client.get_pds.return_value = []
     client.get_appareils.return_value = []
@@ -144,11 +159,26 @@ async def test_coordinator_normalizes_cetc_consumption(hass: HomeAssistant) -> N
     data = await coordinator._async_update_data()
 
     assert data.totals == {
-        "eau_froide": 12.34,
-        "eau_chaude": 5.67,
-        "cetc": 89.01,
+        "eau_froide": Decimal("12.34"),
+        "eau_chaude": Decimal("5.67"),
+        "cetc": Decimal("89.01"),
     }
     assert data.meters == {}
+
+
+def test_unsupported_fluid_does_not_match_cetc(caplog: pytest.LogCaptureFixture) -> None:
+    """Only the confirmed API spelling maps to the existing CETC sensor key."""
+    data = [
+        OceaDashboardData.from_api({"fluide": "CETC", "valeur": "99"}),
+        OceaDashboardData.from_api({"fluide": "Cetc", "valeur": "1,5"}),
+        OceaDashboardData.from_api({"fluide": "EauFroide", "valeur": "private-value"}),
+    ]
+    with caplog.at_level(logging.WARNING):
+        totals = OceaDataUpdateCoordinator._aggregate_totals(data)
+    assert totals == {"cetc": Decimal("1.5")}
+    assert "Ignoring unsupported dashboard fluid" in caplog.text
+    assert "Ignoring invalid dashboard consumption value" in caplog.text
+    assert "private-value" not in caplog.text
 
 
 async def test_coordinator_keeps_consumption_separate_per_pds(
@@ -157,32 +187,55 @@ async def test_coordinator_keeps_consumption_separate_per_pds(
     """Test two points of the same fluid produce independent meter data."""
     client = AsyncMock(spec=OceaApiClient)
     client.get_consumptions.return_value = [
-        {"fluide": "EauFroide", "valeur": "1,14"},
+        OceaDashboardData.from_api({"fluide": "EauFroide", "valeur": "1,14"}),
     ]
     client.get_pds.return_value = [
-        {"id": "pds-cold-1", "fluide": "EauFroide", "emplacement": "Cuisine"},
-        {"id": "pds-cold-2", "fluide": "EauFroide", "emplacement": "Salle de bain"},
+        OceaPdsData.from_api({"id": "pds-cold-1", "fluide": "EauFroide", "emplacement": "Cuisine"}),
+        OceaPdsData.from_api({"id": "pds-cold-2", "fluide": "EauFroide", "emplacement": "Salle de bain"}),
     ]
     client.get_appareils.return_value = [
-        {"pdsId": "pds-cold-1", "numeroSerie": "SERIAL-1"},
-        {"pdsId": "pds-cold-2", "numeroSerie": "SERIAL-2"},
+        OceaDeviceData.from_api({"pdsId": "pds-cold-1", "numeroSerie": "SERIAL-1"}),
+        OceaDeviceData.from_api({"pdsId": "pds-cold-2", "numeroSerie": "SERIAL-2"}),
     ]
     client.get_pds_consumption.side_effect = [
-        {"unite": "m3", "consommations": [{"date": "2026-09-15", "valeur": 0.321}]},
-        {"unite": "m3", "consommations": [{"date": "2026-09-15", "valeur": 0.654}]},
+        OceaConsumptionSeries.from_api({"unite": "m3", "consommations": [{"date": "2026-09-15", "valeur": 0.321}]}),
+        OceaConsumptionSeries.from_api({"unite": "m3", "consommations": [{"date": "2026-09-15", "valeur": 0.654}]}),
     ]
     coordinator = _coordinator(hass, client)
 
     await coordinator._async_setup()
     data = await coordinator._async_update_data()
 
-    assert data.totals["eau_froide"] == 1.14
+    assert data.totals["eau_froide"] == Decimal("1.14")
     assert data.meters["pds-cold-1"].meter.pds.location == "Cuisine"
     assert data.meters["pds-cold-1"].meter.serial_number == "SERIAL-1"
-    assert data.meters["pds-cold-1"].value == 0.321
+    assert data.meters["pds-cold-1"].value == Decimal("0.321")
     assert data.meters["pds-cold-2"].meter.pds.location == "Salle de bain"
     assert data.meters["pds-cold-2"].meter.serial_number == "SERIAL-2"
-    assert data.meters["pds-cold-2"].value == 0.654
+    assert data.meters["pds-cold-2"].value == Decimal("0.654")
+
+
+async def test_coordinator_ignores_metadata_for_unsupported_points(
+    hass: HomeAssistant,
+) -> None:
+    """Unselected PDS and devices do not fail validation of supported meters."""
+    client = AsyncMock(spec=OceaApiClient)
+    client.get_consumptions.return_value = []
+    client.get_pds.return_value = [
+        OceaPdsData.from_api({"id": "water", "fluide": "EauFroide"}),
+        OceaPdsData.from_api({"id": "other", "fluide": "Inconnu", "fce": "unused"}),
+    ]
+    client.get_appareils.return_value = [
+        OceaDeviceData.from_api({"pdsId": "other", "numeroSerie": 42}),
+    ]
+    client.get_pds_consumption.return_value = OceaConsumptionSeries.from_api({})
+    coordinator = _coordinator(hass, client)
+
+    await coordinator._async_setup()
+    data = await coordinator._async_update_data()
+
+    assert set(data.meters) == {"water"}
+    client.get_appareils.assert_awaited_once_with({"pdsIds": ["water"]})
 
 
 def test_meter_data_builder_keeps_latest_leak_estimate() -> None:
@@ -194,7 +247,7 @@ def test_meter_data_builder_keeps_latest_leak_estimate() -> None:
 
     reading = _build_meter_data(
         meter,
-        {
+        OceaConsumptionSeries.from_api({
             "unite": "m3",
             "consommations": [
                 {
@@ -212,13 +265,13 @@ def test_meter_data_builder_keeps_latest_leak_estimate() -> None:
                     "type": "ConsommationEauResponse",
                 },
             ],
-        },
+        }),
     )
 
-    assert reading.value == 0.3
-    assert reading.estimated_leak == 0.015
+    assert reading.value == Decimal("0.3")
+    assert reading.estimated_leak == Decimal("0.015")
     assert reading.unit == "m3"
-    assert reading.latest_date == "2026-09-15"
+    assert reading.latest_date == date(2026, 9, 15)
 
 
 def test_meter_data_builder_normalizes_string_leak_estimate() -> None:
@@ -230,15 +283,129 @@ def test_meter_data_builder_normalizes_string_leak_estimate() -> None:
 
     reading = _build_meter_data(
         meter,
-        {
+        OceaConsumptionSeries.from_api({
             "consommations": [
                 {"date": "2026-09-15", "valeur": "0,321", "fuiteEstimee": "0,015"}
             ],
-        },
+        }),
     )
 
-    assert reading.value == 0.321
-    assert reading.estimated_leak == 0.015
+    assert reading.value == Decimal("0.321")
+    assert reading.estimated_leak == Decimal("0.015")
+
+
+@pytest.mark.parametrize("kind", [None, "FutureResponse", "ConsommationEauResponse"])
+def test_meter_data_builder_preserves_leaks_for_unclassified_items(kind: str | None) -> None:
+    """A missing or new discriminator does not discard an existing leak estimate."""
+    meter = OceaMeter.from_api({"id": "pds-1", "fluide": "EauFroide"}, None)
+    response = {
+        "consommations": [
+            {"type": kind, "date": "2026-09-15", "valeur": 1, "fuiteEstimee": 0.2}
+        ]
+    }
+
+    assert _build_meter_data(meter, OceaConsumptionSeries.from_api(response)).estimated_leak == Decimal("0.2")
+
+
+def test_invalid_readings_produce_a_warned_partial_total(caplog: pytest.LogCaptureFixture) -> None:
+    """Ignore invalid readings without exposing their values or treating them as zero."""
+    meter = OceaMeter.from_api({"id": "pds-private", "fluide": "EauFroide"}, None)
+    response = OceaConsumptionSeries.from_api({"consommations": [
+        {"date": "2026-09-01", "valeur": "0,1"},
+        {"date": "2026-09-02", "valeur": "private-value"},
+        {"date": "private-date", "valeur": 10},
+        {"date": "2026-09-03", "valeur": "0,2", "fuiteEstimee": "0,1"},
+    ]})
+    with caplog.at_level(logging.WARNING):
+        reading = _build_meter_data(meter, response)
+    assert reading.value == Decimal("0.3")
+    assert reading.latest_date is None
+    assert reading.estimated_leak is None
+    assert "total may be incomplete" in caplog.text
+    assert "private" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("invalid_date", "expected_leak"),
+    [("2026-09-01", Decimal("0.1")), ("2026-09-03", None)],
+)
+def test_invalid_reading_cannot_cause_stale_leak_metadata(
+    invalid_date: str, expected_leak: Decimal | None, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Keep valid latest metadata only when the invalid reading is known to be older."""
+    meter = OceaMeter.from_api({"id": "pds", "fluide": "EauFroide"}, None)
+    response = OceaConsumptionSeries.from_api({"consommations": [
+        {"date": "2026-09-02", "valeur": 1, "fuiteEstimee": "0,1"},
+        {"date": invalid_date, "valeur": "invalid", "fuiteEstimee": "0"},
+    ]})
+    with caplog.at_level(logging.WARNING):
+        reading = _build_meter_data(meter, response)
+    assert reading.value == Decimal(1)
+    assert reading.estimated_leak == expected_leak
+    assert "total may be incomplete" in caplog.text
+    if expected_leak is None:
+        assert "metadata is unavailable" in caplog.text
+
+
+def test_all_invalid_readings_are_unavailable(caplog: pytest.LogCaptureFixture) -> None:
+    """An entirely invalid series cannot become a zero consumption."""
+    meter = OceaMeter.from_api({"id": "pds", "fluide": "EauFroide"}, None)
+    response = OceaConsumptionSeries.from_api({"consommations": [{"valeur": 5}]})
+    with caplog.at_level(logging.WARNING):
+        reading = _build_meter_data(meter, response)
+    assert reading.value is None
+    assert reading.latest_date is None
+    assert "total may be incomplete" in caplog.text
+    assert _build_meter_data(meter, OceaConsumptionSeries.from_api({})).value == Decimal(0)
+
+
+def test_latest_instant_respects_explicit_offsets() -> None:
+    """Compare actual instants rather than the lexical order of timestamps."""
+    meter = OceaMeter.from_api({"id": "pds", "fluide": "EauFroide"}, None)
+    response = OceaConsumptionSeries.from_api({"consommations": [
+        {"date": "2026-09-10T12:00:00+02:00", "valeur": 1, "fuiteEstimee": "0,1"},
+        {"date": "2026-09-10T10:30:00Z", "valeur": 2, "fuiteEstimee": "0,2"},
+    ]})
+    reading = _build_meter_data(meter, response)
+    assert reading.latest_date == datetime(2026, 9, 10, 10, 30, tzinfo=timezone.utc)
+    assert reading.estimated_leak == Decimal("0.2")
+
+
+def test_mixed_day_and_instant_metadata_is_not_guessed(caplog: pytest.LogCaptureFixture) -> None:
+    """An unspecific date and a timestamp on the same day have no definite ordering."""
+    meter = OceaMeter.from_api({"id": "pds", "fluide": "EauFroide"}, None)
+    response = OceaConsumptionSeries.from_api({"consommations": [
+        {"date": "2026-09-10", "valeur": 1, "fuiteEstimee": 0.1},
+        {"date": "2026-09-10T12:00:00", "valeur": 2, "fuiteEstimee": 0.2},
+    ]})
+    with caplog.at_level(logging.WARNING):
+        reading = _build_meter_data(meter, response)
+    assert reading.value == Decimal(3)
+    assert reading.latest_date == date(2026, 9, 10)
+    assert reading.estimated_leak is None
+    assert "metadata is unavailable" in caplog.text
+
+
+def test_sensor_values_remain_floats() -> None:
+    """Keep Home Assistant's existing externally exposed numeric values."""
+    coordinator = Mock()
+    meter = OceaMeter.from_api({"id": "pds", "fluide": "EauFroide"}, None)
+    coordinator.data = OceaData(
+        totals={"cetc": Decimal("1.25")},
+        meters={"pds": OceaMeterReading(
+            meter=meter, value=Decimal("0.321"), latest_date=date(2026, 9, 15),
+            estimated_leak=Decimal("0.015"),
+        )},
+    )
+    description = next(description for description in SENSOR_TYPES if description.key == "cetc")
+    sensor = OceaWaterSensor(coordinator, description, "local")
+    assert sensor.native_value == 1.25
+    assert isinstance(sensor.native_value, float)
+    for key, expected in (("eau_froide", 0.321), ("fuite", 0.015)):
+        meter_description = next(description for description in SENSOR_TYPES if description.key == key)
+        meter_sensor = OceaMeterSensor(coordinator, meter_description, "local", meter)
+        assert meter_sensor.native_value == expected
+        assert isinstance(meter_sensor.native_value, float)
 
 
 async def test_coordinator_isolates_malformed_meter_response(
@@ -247,24 +414,24 @@ async def test_coordinator_isolates_malformed_meter_response(
     """Test malformed meter data does not discard other meter readings or totals."""
     client = AsyncMock(spec=OceaApiClient)
     client.get_consumptions.return_value = [
-        {"fluide": "EauFroide", "valeur": "1,14"},
+        OceaDashboardData.from_api({"fluide": "EauFroide", "valeur": "1,14"}),
     ]
     client.get_pds.return_value = [
-        {"id": "pds-cold-1", "fluide": "EauFroide"},
-        {"id": "pds-cold-2", "fluide": "EauFroide"},
+        OceaPdsData.from_api({"id": "pds-cold-1", "fluide": "EauFroide"}),
+        OceaPdsData.from_api({"id": "pds-cold-2", "fluide": "EauFroide"}),
     ]
     client.get_appareils.return_value = []
     client.get_pds_consumption.side_effect = [
-        {"consommations": [{"date": "2026-09-15", "valeur": 0.321}]},
-        {"consommations": [{"date": "2026-09-15", "valeur": "invalid"}]},
+        OceaConsumptionSeries.from_api({"consommations": [{"date": "2026-09-15", "valeur": 0.321}]}),
+        OceaConsumptionSeries.from_api({"consommations": [{"date": "2026-09-15", "valeur": "invalid"}]}),
     ]
     coordinator = _coordinator(hass, client)
 
     await coordinator._async_setup()
     data = await coordinator._async_update_data()
 
-    assert data.totals["eau_froide"] == 1.14
-    assert data.meters["pds-cold-1"].value == 0.321
+    assert data.totals["eau_froide"] == Decimal("1.14")
+    assert data.meters["pds-cold-1"].value == Decimal("0.321")
     assert data.meters["pds-cold-2"].value is None
 
 
@@ -275,22 +442,22 @@ async def test_coordinator_discovers_meters_only_once(
     client = AsyncMock(spec=OceaApiClient)
     client.get_consumptions.return_value = []
     client.get_pds.return_value = [
-        {"id": "pds-cold-1", "fluide": "EauFroide"},
+        OceaPdsData.from_api({"id": "pds-cold-1", "fluide": "EauFroide"}),
     ]
     client.get_appareils.return_value = [
-        {"pdsId": "pds-cold-1", "numeroSerie": "SERIAL-1"},
+        OceaDeviceData.from_api({"pdsId": "pds-cold-1", "numeroSerie": "SERIAL-1"}),
     ]
-    client.get_pds_consumption.return_value = {
+    client.get_pds_consumption.return_value = OceaConsumptionSeries.from_api({
         "consommations": [{"date": "2026-09-15", "valeur": 0.321}],
-    }
+    })
     coordinator = _coordinator(hass, client)
 
     await coordinator._async_setup()
     await coordinator._async_update_data()
     await coordinator._async_update_data()
 
-    client.get_pds.assert_called_once_with()
-    client.get_appareils.assert_called_once_with(["pds-cold-1"])
+    client.get_pds.assert_called_once_with("local-123")
+    client.get_appareils.assert_called_once_with({"pdsIds": ["pds-cold-1"]})
     assert client.get_pds_consumption.call_count == 2
 
 
@@ -302,15 +469,15 @@ async def test_coordinator_keeps_other_meters_when_one_fails(
     """Test one PDS failure does not discard other meter data or totals."""
     client = AsyncMock(spec=OceaApiClient)
     client.get_consumptions.return_value = [
-        {"fluide": "EauFroide", "valeur": "1,14"},
+        OceaDashboardData.from_api({"fluide": "EauFroide", "valeur": "1,14"}),
     ]
     client.get_pds.return_value = [
-        {"id": "pds-cold-1", "fluide": "EauFroide"},
-        {"id": "pds-cold-2", "fluide": "EauFroide"},
+        OceaPdsData.from_api({"id": "pds-cold-1", "fluide": "EauFroide"}),
+        OceaPdsData.from_api({"id": "pds-cold-2", "fluide": "EauFroide"}),
     ]
     client.get_appareils.return_value = []
     client.get_pds_consumption.side_effect = [
-        {"consommations": [{"date": "2026-09-15", "valeur": 0.321}]},
+        OceaConsumptionSeries.from_api({"consommations": [{"date": "2026-09-15", "valeur": 0.321}]}),
         error,
     ]
     coordinator = _coordinator(hass, client)
@@ -318,7 +485,7 @@ async def test_coordinator_keeps_other_meters_when_one_fails(
     await coordinator._async_setup()
     data = await coordinator._async_update_data()
 
-    assert data.totals["eau_froide"] == 1.14
+    assert data.totals["eau_froide"] == Decimal("1.14")
     assert set(data.meters) == {"pds-cold-1", "pds-cold-2"}
     assert data.meters["pds-cold-2"].value is None
 
@@ -331,12 +498,12 @@ async def test_coordinator_does_not_log_meter_details(
     client = AsyncMock(spec=OceaApiClient)
     client.get_consumptions.return_value = []
     client.get_pds.return_value = [
-        {"id": "pds-secret", "fluide": "EauFroide"},
+        OceaPdsData.from_api({"id": "pds-secret", "fluide": "EauFroide"}),
     ]
     client.get_appareils.return_value = [
-        {"pdsId": "pds-secret", "numeroSerie": "serial-secret"},
+        OceaDeviceData.from_api({"pdsId": "pds-secret", "numeroSerie": "serial-secret"}),
     ]
-    client.get_pds_consumption.return_value = {"consommations": []}
+    client.get_pds_consumption.return_value = OceaConsumptionSeries.from_api({"consommations": []})
     coordinator = _coordinator(hass, client)
 
     with caplog.at_level(logging.DEBUG):
