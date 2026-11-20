@@ -24,12 +24,16 @@ Home Assistant integration to monitor water and heating consumption from the [Oc
 
 ### Via HACS (recommended)
 
+This integration is available in the official HACS default repository.
+
 [![Open your Home Assistant instance and open this repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Triskae&repository=ha_ocea_smart_building&category=integration)
 
-1. HACS → Integrations → ⋮ → Custom repositories
-2. Add the repository URL, category **Integration**
-3. Search for "Ocea Smart Building" → Install
+1. In Home Assistant, open **HACS** → **Integrations**
+2. Search for **Ocea Smart Building**
+3. Select the integration and click **Download**
 4. Restart Home Assistant
+
+There is no need to add this repository as a custom repository.
 
 ### Manual
 
@@ -221,8 +225,8 @@ If installed through HACS, uninstall it there as well and restart Home Assistant
 to remove the integration files.
 
 <!-- Badge references -->
-[hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
-[hacs-url]: https://github.com/hacs/integration
+[hacs-badge]: https://img.shields.io/badge/HACS-Default-41BDF5.svg
+[hacs-url]: https://github.com/hacs/default
 [release-badge]: https://img.shields.io/github/v/release/Triskae/ha_ocea_smart_building
 [release-url]: https://github.com/Triskae/ha_ocea_smart_building/releases
 [downloads-badge]: https://img.shields.io/github/downloads/Triskae/ha_ocea_smart_building/total
