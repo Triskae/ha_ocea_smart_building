@@ -2,7 +2,7 @@
 
 [![hacs][hacs-badge]][hacs-url]
 [![release][release-badge]][release-url]
-![downloads][downloads-badge]
+![installations][installations-badge]
 
 Home Assistant integration to monitor water and heating consumption from the [Ocea Smart Building](https://espace-resident.ocea-sb.com) resident portal.
 
@@ -229,4 +229,4 @@ to remove the integration files.
 [hacs-url]: https://github.com/hacs/default
 [release-badge]: https://img.shields.io/github/v/release/Triskae/ha_ocea_smart_building
 [release-url]: https://github.com/Triskae/ha_ocea_smart_building/releases
-[downloads-badge]: https://img.shields.io/github/downloads/Triskae/ha_ocea_smart_building/total
+[installations-badge]: https://img.shields.io/badge/dynamic/json?color=41BDF5&logo=home-assistant&label=integration%20usage&suffix=%20installs&cacheSeconds=15600&url=https://analytics.home-assistant.io/custom_integrations.json&query=$.ocea_smart_building.total
