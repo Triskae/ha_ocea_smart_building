@@ -37,16 +37,24 @@ def cli_args(start=None, end=None):
     )
 
 
-def mock_cli_session(monkeypatch, results):
+def mock_cli_session(monkeypatch, results, dwelling_results=None):
     """Prepare a session and authentication for one CLI invocation."""
     session = MagicMock()
     session.__enter__.return_value = session
-    session.request.side_effect = results
+    if dwelling_results is None:
+        dwelling_results = [response({"fluidesRestitues": []})]
+    session.request.side_effect = [*results[:2], *dwelling_results, *results[2:]]
     monkeypatch.setattr(ocea_cli.requests, "Session", lambda: session)
     monkeypatch.setattr(
         ocea_cli, "authenticate", lambda *_args: {"access_token": "placeholder-token"}
     )
     return session
+
+
+def test_fluid_label_recognizes_exact_cetc_code():
+    """Only the actual Ocea code is recognized as CETC heating."""
+    assert ocea_cli.fluid_label("Cetc") == "Heating (CETC)"
+    assert ocea_cli.fluid_label("CETC") == "Other fluid"
 
 
 @pytest.mark.usefixtures("local_http_only")
@@ -72,6 +80,28 @@ async def test_real_daily_http_request(aiohttp_server, monkeypatch):
     assert seen == [
         ("/api/v1/local/local/pds/pds%2F1/conso", "Bearer placeholder-token", payload)
     ]
+
+
+@pytest.mark.usefixtures("local_http_only")
+async def test_real_dwelling_http_request(aiohttp_server, monkeypatch):
+    """Encode both path segments and send the daily request unchanged."""
+    seen = []
+
+    async def handler(request):
+        seen.append((request.raw_path, await request.json()))
+        return web.json_response({"unite": "m3", "consommations": []})
+
+    app = web.Application()
+    app.router.add_post("/api/v1/local/{local}/conso/{fluid:.+}", handler)
+    server = await aiohttp_server(app)
+    monkeypatch.setattr(ocea_cli, "API_BASE", str(server.make_url("/")).rstrip("/"))
+    payload = ocea_cli.period_payload(date(2026, 2, 1), date(2026, 2, 3))
+    with requests.Session() as session:
+        await asyncio.to_thread(
+            ocea_cli.fetch_dwelling_consumption,
+            session, "placeholder-token", "local/1", "fluid/1", payload,
+        )
+    assert seen == [("/api/v1/local/local%2F1/conso/fluid%2F1", payload)]
 
 
 def test_daily_pds_requests_and_safe_output(monkeypatch, capsys, caplog):
@@ -102,8 +132,10 @@ def test_daily_pds_requests_and_safe_output(monkeypatch, capsys, caplog):
     caplog.set_level(logging.DEBUG, logger="ocea")
     assert ocea_cli.main(cli_args(date(2026, 2, 1), date(2026, 2, 3))) == 0
     calls = session.request.call_args_list
-    assert [call.args[0] for call in calls] == ["GET", "GET", "GET", "POST", "POST", "POST"]
-    assert [call.args[1] for call in calls[3:]] == [
+    assert [call.args[0] for call in calls] == [
+        "GET", "GET", "GET", "GET", "POST", "POST", "POST"
+    ]
+    assert [call.args[1] for call in calls[4:]] == [
         f"{ocea_cli.API_BASE}/api/v1/local/private-local/pds/{pds}/conso"
         for pds in ("private-water", "private-heat", "private-other")
     ]
@@ -111,7 +143,7 @@ def test_daily_pds_requests_and_safe_output(monkeypatch, capsys, caplog):
         "debut": "2026-02-01T00:00:00.000Z",
         "fin": "2026-02-03T23:59:59.999Z",
         "granularity": "Day",
-    } for call in calls[3:])
+    } for call in calls[4:])
     output = capsys.readouterr().out + caplog.text
     assert "PDS 1: Cold water" in output
     assert "PDS 2: Heating (CETC)" in output
@@ -128,6 +160,95 @@ def test_daily_pds_requests_and_safe_output(monkeypatch, capsys, caplog):
         "private-other", "placeholder-token", "resident@example.invalid", "placeholder password",
     ):
         assert private not in output
+
+
+def test_dwelling_consumption_discovery_and_safe_output(monkeypatch, capsys, caplog):
+    """Explore distinct supported fluids even when there are no PDS."""
+    session = mock_cli_session(
+        monkeypatch,
+        [
+            response({"occupations": [{"logementId": "private-local"}]}),
+            response([]),
+            response([]),
+        ],
+        dwelling_results=[
+            response({"fluidesRestitues": [
+                {"fluide": "EauFroide"}, {"fluide": "EauFroide"},
+                {"fluide": "Cetc"}, {"fluide": "private-fluid"},
+            ]}),
+            response({"unite": "m3", "consommations": [{
+                "date": "2026-02-01", "valeur": 0.1, "consentement": True,
+                "type": "ConsommationEauResponse", "private-key": "private-value",
+            }], "private-top": "private-value"}),
+            response({"unite": "kWh", "consommations": []}),
+        ],
+    )
+    caplog.set_level(logging.DEBUG, logger="ocea")
+    assert ocea_cli.main(cli_args(date(2026, 2, 1), date(2026, 2, 2))) == 0
+    calls = session.request.call_args_list
+    assert [call.args[1] for call in calls[3:5]] == [
+        f"{ocea_cli.API_BASE}/api/v1/local/private-local/conso/EauFroide",
+        f"{ocea_cli.API_BASE}/api/v1/local/private-local/conso/Cetc",
+    ]
+    assert all(call.kwargs["json"] == ocea_cli.period_payload(
+        date(2026, 2, 1), date(2026, 2, 2)
+    ) for call in calls[3:5])
+    output = capsys.readouterr().out + caplog.text
+    assert "Dwelling: Cold water (EauFroide)" in output
+    assert "Dwelling: Heating (CETC) (Cetc)" in output
+    assert "Reported unit: m3" in output
+    assert "Field consentement: 1/1" in output
+    assert "Field isEstimated: 0/1" in output
+    assert "Readings with other fields: 1" in output
+    assert "Response contains other fields." in output
+    assert "No PDS found" in output
+    for private in ("private-local", "private-fluid", "private-key", "private-top", "private-value"):
+        assert private not in output
+
+
+def test_dwelling_failures_do_not_stop_other_sources(monkeypatch, capsys, caplog):
+    """Report one failed aggregate response and continue with other fluids and PDS."""
+    mock_cli_session(
+        monkeypatch,
+        [
+            response({"occupations": [{"logementId": "local"}]}),
+            response([]),
+            response([{"id": "pds-1", "fluide": "EauFroide"}]),
+            response({"unite": "m3", "consommations": []}),
+        ],
+        dwelling_results=[
+            response({"fluidesRestitues": [
+                {"fluide": "EauFroide"}, {"fluide": "EauChaude"},
+            ]}),
+            response("private response", 503),
+            response({"unite": "m3", "consommations": []}),
+        ],
+    )
+    assert ocea_cli.main(cli_args(date(2026, 2, 1), date(2026, 2, 1))) == 1
+    assert "Dwelling Cold water: HTTP 503" in caplog.text
+    output = capsys.readouterr().out
+    assert "Dwelling: Hot water" in output
+    assert "PDS 1: Cold water" in output
+    assert "private response" not in output + caplog.text
+
+
+def test_invalid_dwelling_discovery_does_not_stop_pds(monkeypatch, capsys, caplog):
+    """An invalid dwelling response remains an error while PDS are explored."""
+    mock_cli_session(
+        monkeypatch,
+        [
+            response({"occupations": [{"logementId": "local"}]}),
+            response([]),
+            response([{"id": "pds", "fluide": "EauFroide"}]),
+            response({"unite": "m3", "consommations": []}),
+        ],
+        dwelling_results=[response({"fluidesRestitues": None})],
+    )
+    assert ocea_cli.main(cli_args(date(2026, 2, 1), date(2026, 2, 1))) == 1
+    assert "Dwelling fluids: Invalid dwelling fluids response" in caplog.text
+    output = capsys.readouterr().out
+    assert "PDS 1: Cold water" in output
+    assert "No dwelling fluids available" not in output
 
 
 def test_default_period_uses_local_month(monkeypatch, capsys):
@@ -256,7 +377,7 @@ def test_missing_pds_identifier_does_not_stop_later_pds(monkeypatch, capsys, cap
         response({"unite": "kWh", "consommations": [{"date": "2026-02-01", "valeur": 1}]}),
     ])
     assert ocea_cli.main(cli_args(date(2026, 2, 1), date(2026, 2, 1))) == 1
-    assert session.request.call_count == 4
+    assert session.request.call_count == 5
     assert "missing identifier" in caplog.text
     assert "2026-02-01: 1 kWh" in capsys.readouterr().out
 

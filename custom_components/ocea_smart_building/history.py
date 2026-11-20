@@ -113,10 +113,50 @@ def _history_id(
     return sha256(identity.encode()).hexdigest()
 
 
-def _statistic_id(local_id: str, meter: OceaMeter) -> str:
+def _meter_statistic_id(local_id: str, meter: OceaMeter) -> str:
     """Return a stable Recorder ID without exposing Ocea identifiers."""
     key = _history_id(local_id, meter)
     return f"{DOMAIN}:{PDS_FLUID_METADATA[meter.pds.fluid].statistic_id_prefix}_{key}"
+
+
+def _dwelling_history_id(local_id: str, fluid: str) -> str:
+    """Build a stable, separate cache key for one dwelling and fluid."""
+    return sha256(f"{local_id}\0{fluid}".encode()).hexdigest()
+
+
+def _dwelling_statistic_id(local_id: str, fluid: str) -> str:
+    """Return a stable Recorder ID for a dwelling consumption series."""
+    prefix = PDS_FLUID_METADATA[fluid].statistic_id_prefix
+    return f"{DOMAIN}:{prefix}_{_dwelling_history_id(local_id, fluid)}"
+
+
+def _meter_metadata(local_id: str, meter: OceaMeter) -> StatisticMetaData:
+    """Build Recorder metadata for an existing PDS series."""
+    fluid_metadata = PDS_FLUID_METADATA[meter.pds.fluid]
+    serial_number = meter.serial_number or _history_id(local_id, meter)[:8]
+    return StatisticMetaData(
+        mean_type=StatisticMeanType.NONE,
+        has_sum=True,
+        name=f"OCEA - {local_id} - {fluid_metadata.statistic_display_label} - {serial_number}",
+        source=DOMAIN,
+        statistic_id=_meter_statistic_id(local_id, meter),
+        unit_class=fluid_metadata.statistic_unit_class,
+        unit_of_measurement=fluid_metadata.statistic_unit_of_measurement,
+    )
+
+
+def _dwelling_metadata(local_id: str, fluid: str) -> StatisticMetaData:
+    """Build Recorder metadata for a dwelling consumption series."""
+    fluid_metadata = PDS_FLUID_METADATA[fluid]
+    return StatisticMetaData(
+        mean_type=StatisticMeanType.NONE,
+        has_sum=True,
+        name=f"OCEA - {local_id} - {fluid_metadata.statistic_display_label}",
+        source=DOMAIN,
+        statistic_id=_dwelling_statistic_id(local_id, fluid),
+        unit_class=fluid_metadata.statistic_unit_class,
+        unit_of_measurement=fluid_metadata.statistic_unit_of_measurement,
+    )
 
 
 def _decimal_value(value: object) -> Decimal:
@@ -135,7 +175,7 @@ def _decimal_value(value: object) -> Decimal:
 def _parse_daily_response(
     response: OceaConsumptionSeries, expected_unit: str
 ) -> tuple[OceaDailyConsumption, ...]:
-    """Validate a daily PDS response without assuming missing values are zero."""
+    """Validate a daily response without assuming missing values are zero."""
     if response.unit != expected_unit:
         raise OceaApiError("Unsupported daily consumption unit")
     items = daily_consumptions_from_series(response)
@@ -270,7 +310,7 @@ def _daily_statistics(
 
 
 class OceaHistorySynchronizer:
-    """Backfill and update one external statistic per supported PDS."""
+    """Backfill and update external statistics for meters and dwelling fluids."""
 
     def __init__(
         self,
@@ -291,10 +331,9 @@ class OceaHistorySynchronizer:
         self._published: set[str] = set()
 
     async def _async_restore_history(
-        self, meter: OceaMeter, start: date, today: date
+        self, statistic_id: str, start: date, today: date
     ) -> MeterHistory | None:
         """Recover cached daily values from Recorder before an API backfill."""
-        statistic_id = _statistic_id(self.local_id, meter)
         statistics = await self.hass.async_add_executor_job(
             get_last_statistics,
             self.hass,
@@ -350,7 +389,10 @@ class OceaHistorySynchronizer:
         )
 
     async def _async_sync(self) -> None:
-        """Synchronize each meter independently."""
+        """Synchronize each meter and dwelling fluid independently."""
+        data = self.coordinator.data
+        if data is None:
+            return
         try:
             if self._histories is None:
                 try:
@@ -379,9 +421,6 @@ class OceaHistorySynchronizer:
             _LOGGER.warning("Unable to synchronize Ocea consumption history")
             return
 
-        data = self.coordinator.data
-        if data is None:
-            return
         for reading in data.meters.values():
             try:
                 await self._async_sync_meter(reading, occupation_start, today, now)
@@ -393,25 +432,69 @@ class OceaHistorySynchronizer:
             except (ClientError, TimeoutError, OSError):
                 _LOGGER.warning("Unable to synchronize one Ocea meter history")
 
+        try:
+            dwelling_fluids = await self.client.get_dwelling_fluids(self.local_id)
+        except OceaAuthError:
+            _LOGGER.warning("Unable to authenticate while synchronizing Ocea history")
+            return
+        except OceaApiError as err:
+            _LOGGER.warning("Unable to discover Ocea dwelling fluids: %s", err)
+            return
+        except (ClientError, TimeoutError, OSError):
+            _LOGGER.warning("Unable to discover Ocea dwelling fluids")
+            return
+        unsupported_count = len(set(dwelling_fluids) - PDS_FLUID_METADATA.keys())
+        if unsupported_count:
+            _LOGGER.debug("Ignoring %d unsupported dwelling fluids", unsupported_count)
+        for fluid in sorted(set(dwelling_fluids) & PDS_FLUID_METADATA.keys()):
+            try:
+                await self._async_sync_series(fluid, occupation_start, today, now, None)
+            except OceaAuthError:
+                _LOGGER.warning("Unable to authenticate while synchronizing Ocea history")
+                return
+            except OceaApiError as err:
+                _LOGGER.warning("Unable to synchronize one Ocea dwelling history: %s", err)
+            except (ClientError, TimeoutError, OSError):
+                _LOGGER.warning("Unable to synchronize one Ocea dwelling history")
+
     async def _async_sync_meter(
         self, reading: OceaMeterReading, occupation_start: date, today: date, now: datetime
     ) -> None:
-        """Update cached readings and publish their recalculated cumulative sums."""
+        """Synchronize one meter."""
+        await self._async_sync_series(
+            reading.meter.pds.fluid, occupation_start, today, now, reading
+        )
+
+    async def _async_sync_series(
+        self,
+        fluid: str,
+        occupation_start: date,
+        today: date,
+        now: datetime,
+        reading: OceaMeterReading | None,
+    ) -> None:
+        """Update one series and publish recalculated cumulative sums."""
         assert self._histories is not None
         assert self._generation is not None
-        meter = reading.meter
-        fluid = meter.pds.fluid
         fluid_metadata = PDS_FLUID_METADATA.get(fluid)
         if fluid_metadata is None:
-            raise OceaApiError("Unsupported meter fluid")
+            raise OceaApiError("Unsupported consumption fluid")
         expected_unit = fluid_metadata.api_unit
-        start = _history_start(occupation_start, meter)
+        meter = reading.meter if reading is not None else None
+        start = _history_start(occupation_start, meter) if meter else occupation_start
         if start > today:
-            raise OceaApiError("Ocea meter history begins in the future")
-        key = _history_id(self.local_id, meter)
+            raise OceaApiError("Ocea consumption history begins in the future")
+        key = (
+            _history_id(self.local_id, meter)
+            if meter else _dwelling_history_id(self.local_id, fluid)
+        )
+        metadata = (
+            _meter_metadata(self.local_id, meter)
+            if meter else _dwelling_metadata(self.local_id, fluid)
+        )
         previous = self._histories.get(key)
         if previous is None:
-            previous = await self._async_restore_history(meter, start, today)
+            previous = await self._async_restore_history(metadata["statistic_id"], start, today)
         if previous is None:
             previous = MeterHistory(start, start, recheck_cursor=start)
         history_start = min(start, previous.start)
@@ -426,11 +509,12 @@ class OceaHistorySynchronizer:
             previous.next_request,
             recheck_cursor,
         )
-        try:
-            current_items = _current_daily_readings(reading, expected_unit, today)
-        except OceaApiError:
-            _LOGGER.warning("Unable to use current daily readings for one Ocea meter")
-            current_items = None
+        current_items = None
+        if reading is not None:
+            try:
+                current_items = _current_daily_readings(reading, expected_unit, today)
+            except OceaApiError:
+                _LOGGER.warning("Unable to use current daily readings for one Ocea meter")
 
         rechecking = False
         if history.cursor <= today:
@@ -485,11 +569,14 @@ class OceaHistorySynchronizer:
                         "fin": f"{end.isoformat()}T23:59:59.999Z",
                         "granularity": "Day",
                     }
-                    response = await self.client.get_pds_consumption(
-                        self.local_id,
-                        meter.identifier,
-                        payload,
-                    )
+                    if meter:
+                        response = await self.client.get_pds_consumption(
+                            self.local_id, meter.identifier, payload
+                        )
+                    else:
+                        response = await self.client.get_dwelling_consumption(
+                            self.local_id, fluid, payload
+                        )
                     items = _parse_daily_response(response, expected_unit)
                 else:
                     items = None
@@ -508,9 +595,9 @@ class OceaHistorySynchronizer:
                             else recheck_cursor
                         )
             except OceaApiError as err:
-                _LOGGER.warning("Unable to retrieve one Ocea meter history period: %s", err)
+                _LOGGER.warning("Unable to retrieve one Ocea history period: %s", err)
             except (ClientError, TimeoutError):
-                _LOGGER.warning("Unable to retrieve one Ocea meter history period")
+                _LOGGER.warning("Unable to retrieve one Ocea history period")
 
         if key not in self._histories or history != previous:
             updated = {**self._histories, key: history}
@@ -525,15 +612,5 @@ class OceaHistorySynchronizer:
         statistics = _daily_statistics(history.start, history.days, changed_since)
         if not statistics:
             return
-        serial_number = meter.serial_number or key[:8]
-        metadata = StatisticMetaData(
-            mean_type=StatisticMeanType.NONE,
-            has_sum=True,
-            name=f"OCEA - {fluid_metadata.statistic_display_label} - {serial_number}",
-            source=DOMAIN,
-            statistic_id=_statistic_id(self.local_id, meter),
-            unit_class=fluid_metadata.statistic_unit_class,
-            unit_of_measurement=fluid_metadata.statistic_unit_of_measurement,
-        )
         async_add_external_statistics(self.hass, metadata, statistics)
         self._published.add(key)

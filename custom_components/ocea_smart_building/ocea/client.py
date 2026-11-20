@@ -24,6 +24,7 @@ from .models import (
     OceaDeviceData,
     OceaDevicesRequest,
     OceaDwellingDetails,
+    OceaDwellingFluids,
     OceaPdsData,
     OceaResident,
     is_consumption_response,
@@ -144,6 +145,15 @@ class OceaApiClient:
         result = await self._api_request("GET", f"/api/v1/local/{path_id}", diagnostic="dwelling")
         return OceaDwellingDetails.from_api(_object_response(result))
 
+    async def get_dwelling_fluids(self, local_id: str) -> list[str]:
+        """Get the fluids advertised for a dwelling."""
+        result = _object_response(
+            await self._api_request(
+                "GET", f"/api/v1/local/{quote(local_id, safe='')}", diagnostic="dwelling"
+            )
+        )
+        return list(OceaDwellingFluids.from_api(result).fluids)
+
     async def get_pds(self, local_id: str) -> list[OceaPdsData]:
         """Get a dwelling's points of measurement."""
         result = await self._api_request(
@@ -172,6 +182,20 @@ class OceaApiClient:
             await self._api_request(
                 "POST",
                 f"/api/v1/local/{quote(local_id, safe='')}/pds/{quote(pds_id, safe='')}/conso",
+                payload,
+                diagnostic="consumption",
+            )
+        )
+        return OceaConsumptionSeries.from_api(_validated_response(result, is_consumption_response))
+
+    async def get_dwelling_consumption(
+        self, local_id: str, fluid: str, payload: OceaConsumptionRequest
+    ) -> OceaConsumptionSeries:
+        """Get consumption data for a dwelling and fluid."""
+        result = _object_response(
+            await self._api_request(
+                "POST",
+                f"/api/v1/local/{quote(local_id, safe='')}/conso/{quote(fluid, safe='')}",
                 payload,
                 diagnostic="consumption",
             )

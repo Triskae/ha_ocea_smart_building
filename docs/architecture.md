@@ -59,7 +59,7 @@ C4Component
     Component(configFlow, "Config flow", "config_flow.py", "Validates credentials and manages setup, reauthentication, and reconfiguration")
     Component(entrySetup, "Entry lifecycle", "__init__.py", "Creates entry-scoped client resources and loads or unloads platforms")
     Component(coordinator, "Data update coordinator", "coordinator.py", "Discovers meters, polls Ocea, and normalizes typed readings")
-    Component(history, "History synchronizer", "history.py", "Backfills dated PDS statistics and updates corrected readings")
+    Component(history, "History synchronizer", "history.py", "Backfills dwelling and PDS statistics and updates corrected readings")
     Component(entities, "Entity platforms", "sensor.py, binary_sensor.py, entity.py", "Expose water leak estimates and alerts")
     Component(apiClient, "Ocea API client and models", "ocea/client.py, ocea/models.py", "Makes asynchronous API requests and validates response shapes")
     Component(authentication, "B2C authentication", "ocea/auth.py", "Performs browser-compatible authorization, PKCE, and token refresh")
@@ -145,8 +145,10 @@ refresh discovers the dwelling's supported water and CETC meters and associated 
 metadata. Meter discovery is cached for the loaded entry. The coordinator then
 fetches dwelling totals and each discovered meter's current-month readings on
 the five-hour interval. Entity platforms expose leak estimates and alerts to Home
-Assistant, while the history synchronizer imports dated water and CETC readings as
-external statistics. The front-end identifies the thermal fluid as `Cetc` and
+Assistant, while the history synchronizer imports dated water and CETC PDS
+readings and separate dwelling water and CETC readings as external statistics.
+Dwelling fluid discovery does not depend on PDS discovery and uses the same
+supported-fluid metadata. The front-end identifies the thermal fluid as `Cetc` and
 maps it to kWh; the client classifies generic, water, RFC and unclassified
 consumption responses while retaining Ocea's wire fields. A meter-specific
 read failure does not discard successful readings from other meters or the
@@ -158,14 +160,17 @@ Current-month requests and historical timestamps use the Ocea calendar
 external statistic ID is derived from the configured dwelling ID, PDS ID and
 exact supported fluid code. It does not depend on the config-entry ID, cache
 generation, history start date, device serial number or timezone. The private
-Store holds progress and daily values, not the statistic identity. If the
+Store holds progress and daily values, not the statistic identity. Dwelling
+water and CETC series use separate stable IDs derived from the dwelling ID and fluid,
+and their history starts at the active occupation. Display names include the
+dwelling ID. If the
 Store is absent or invalid, the synchronizer can rebuild under the same ID;
 Recorder rows are updated at matching timestamps and are never reset by cache
 reconstruction.
 
 Backfill advances in inclusive periods of at most 30 days. After it catches up,
 the synchronizer revisits completed periods in a persisted round-robin, at most
-one API request per meter per five-hour cycle. When Ocea returns a changed
+one API request per series per five-hour cycle. When Ocea returns a changed
 daily value, the synchronizer recalculates and republishes cumulative sums from
 the first changed day onward. A missing date is not synthesized as zero or
 interpreted as a deletion.
@@ -177,7 +182,7 @@ interpreted as a deletion.
 | `__init__.py` | Config-entry lifecycle: create the entry-scoped HTTP session and API client, perform the first coordinator refresh, forward platforms, and unload them. |
 | `config_flow.py` | Initial setup, reauthentication, and reconfiguration. Validate credentials with the client, derive the dwelling ID and title from resident data, and persist the validated config. |
 | `coordinator.py` | Discover PDS/meter metadata at startup; fetch and normalize dwelling totals and per-meter readings; expose a typed coordinator payload and translate API failures to Home Assistant update/auth errors. |
-| `history.py` | Cache and backfill dated water and CETC readings, recalculate cumulative sums and enqueue external Recorder statistics. |
+| `history.py` | Cache and backfill dwelling and PDS water and CETC readings, recalculate cumulative sums and enqueue external Recorder statistics. |
 | `entity.py` | Shared coordinator entity base, device metadata, and stable unique-ID construction for dwelling and meter entities. |
 | `sensor.py` | Estimated-leak sensors for water meters when Ocea provides estimates. |
 | `binary_sensor.py` | Per-meter leak state, derived from the latest estimated-leak value. Missing estimates are represented as unavailable, not as “no leak.” |
