@@ -53,8 +53,8 @@
       "unknown": "Unexpected error"
     },
     "abort": {
-      "already_configured": "This account is already configured",
-      "unique_id_mismatch": "Use the configured Ocea account to re-authenticate.",
+      "already_configured": "This dwelling is already configured",
+      "unique_id_mismatch": "The dwelling does not match the configured dwelling.",
       "reconfigure_successful": "Reconfiguration was successful",
       "reauth_successful": "Re-authentication was successful"
     }
@@ -77,9 +77,6 @@
       },
       "eau_chaude": {
         "name": "Hot water"
-      },
-      "cetc": {
-        "name": "Thermal heating"
       },
       "fuite": {
         "name": "Estimated leak"

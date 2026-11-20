@@ -50,7 +50,7 @@ def _format_address(address: OceaAddress | None) -> str | None:
 class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Ocea Smart Building."""
 
-    VERSION = 1
+    VERSION = 2
 
     _pending_data: dict[str, str]
     _pending_name: str
@@ -71,8 +71,11 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                 accessible.append(dwelling)
         return accessible
 
-    def _create_dwelling_entry(self, local_id: str) -> FlowResult:
+    async def _create_dwelling_entry(self, local_id: str) -> FlowResult:
         """Finish initial setup using a validated dwelling."""
+        await self.async_set_unique_id(local_id)
+        self._abort_if_unique_id_configured()
+        self._async_abort_entries_match({CONF_LOCAL_ID: local_id})
         data = self._pending_data
         name = self._pending_name
         self._pending_data = {}
@@ -90,9 +93,6 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            await self.async_set_unique_id(user_input[CONF_EMAIL].lower())
-            self._abort_if_unique_id_configured()
-
             session = async_create_clientsession(
                 self.hass,
                 auto_cleanup=False,
@@ -165,7 +165,7 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                 }
                 self._pending_name = resident.name
                 if len(options) == 1:
-                    return self._create_dwelling_entry(options[0][0].local_id)
+                    return await self._create_dwelling_entry(options[0][0].local_id)
                 self._dwelling_options = selection_options
                 return await self.async_step_dwelling()
 
@@ -191,7 +191,7 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Choose explicitly among the accessible dwellings."""
         if user_input is not None:
-            return self._create_dwelling_entry(user_input[CONF_LOCAL_ID])
+            return await self._create_dwelling_entry(user_input[CONF_LOCAL_ID])
         return self.async_show_form(
             step_id="dwelling",
             data_schema=vol.Schema(
@@ -231,7 +231,7 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
             try:
                 await client.validate_credentials()
                 resident = await client.get_resident()
-                await self.async_set_unique_id(user_input[CONF_EMAIL].lower())
+                await self.async_set_unique_id(reauth_entry.data[CONF_LOCAL_ID])
                 self._abort_if_unique_id_mismatch()
                 if not resident.dwellings:
                     errors["base"] = "no_occupation"
@@ -341,21 +341,8 @@ class OceaSmartBuildingConfigFlow(ConfigFlow, domain=DOMAIN):
                     local_id = reconfigure_entry.data[CONF_LOCAL_ID]
                     name = resident.name
                     title = f"Ocea - {name}" if name else f"Ocea - {local_id}"
-                    unique_id = email.lower()
-                    existing_entry = (
-                        self.hass.config_entries.async_entry_for_domain_unique_id(
-                            DOMAIN, unique_id
-                        )
-                    )
-                    if (
-                        existing_entry is not None
-                        and existing_entry.entry_id != reconfigure_entry.entry_id
-                    ):
-                        return self.async_abort(reason="already_configured")
-
                     return self.async_update_reload_and_abort(
                         reconfigure_entry,
-                        unique_id=unique_id,
                         title=title,
                         data_updates={
                             CONF_EMAIL: email,

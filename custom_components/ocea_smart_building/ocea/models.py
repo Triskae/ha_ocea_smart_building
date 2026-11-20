@@ -321,7 +321,7 @@ def _consumption_data(item: OceaConsumptionItem) -> OceaConsumptionDataItem:
 
 @dataclass(frozen=True, slots=True)
 class OceaConsumptionSeries:
-    """A validated PDS consumption response."""
+    """A validated meter or dwelling consumption response."""
 
     unit: str | None
     items: tuple[OceaConsumptionDataItem, ...]
@@ -548,6 +548,26 @@ class OceaDwellingDetails:
         if not isinstance(address, dict):
             raise OceaApiError("Invalid dwelling address")
         return cls(address=OceaAddress.from_api(cast(dict[str, object], address)))
+
+
+@dataclass(frozen=True, slots=True)
+class OceaDwellingFluids:
+    """Validated fluids advertised by the dwelling endpoint."""
+
+    fluids: tuple[str, ...]
+
+    @classmethod
+    def from_api(cls, data: Mapping[str, object]) -> OceaDwellingFluids:
+        """Parse the advertised fluids without requiring address details."""
+        fluids = data.get("fluidesRestitues")
+        if not isinstance(fluids, list):
+            raise OceaApiError("Invalid dwelling fluids")
+        result: list[str] = []
+        for item in fluids:
+            if not isinstance(item, dict) or not isinstance(item.get("fluide"), str):
+                raise OceaApiError("Invalid dwelling fluid")
+            result.append(item["fluide"])
+        return cls(fluids=tuple(result))
 
 
 def _optional_string(data: Mapping[str, object], key: str) -> str | None:
