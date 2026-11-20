@@ -1,8 +1,8 @@
 # Ocea Smart Building - Home Assistant Integration
 
-[![hacs][hacs-badge]][hacs-url]
+[![marketplace][marketplace-badge]][marketplace-url]
 [![release][release-badge]][release-url]
-![downloads][downloads-badge]
+[![installations][installations-badge]][installations-url]
 
 Home Assistant integration to monitor water and heating consumption from the [Ocea Smart Building](https://espace-resident.ocea-sb.com) resident portal.
 
@@ -22,14 +22,31 @@ Home Assistant integration to monitor water and heating consumption from the [Oc
 
 ## Installation
 
-### Via HACS (recommended)
+### Marketplace (Home Assistant 2026.11 and above, recommended)
 
-[![Open your Home Assistant instance and open this repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Triskae&repository=ha_ocea_smart_building&category=integration)
+[![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=Triskae&repository=ha_ocea_smart_building&category=integration)
 
-1. HACS → Integrations → ⋮ → Custom repositories
-2. Add the repository URL, category **Integration**
-3. Search for "Ocea Smart Building" → Install
-4. Restart Home Assistant
+Since Home Assistant 2026.11, HACS is built into Home Assistant as the
+[Marketplace](https://www.home-assistant.io/integrations/marketplace/), found
+under **Settings** → **Marketplace**. This integration is available in its
+catalog.
+
+1. Open the integration with the button above, or search for **Ocea Smart Building** under **Settings** → **Marketplace**
+2. If this is your first time using the Marketplace, read the notice and accept it
+3. Select **Install**, which takes you straight into the [configuration](#configuration)
+
+If you previously installed the integration with HACS, Home Assistant migrates
+it to the Marketplace automatically when you upgrade to 2026.11. You do not
+need to reinstall it.
+
+### HACS (Home Assistant 2026.10 and below)
+
+On earlier versions, install the integration with HACS, where it is available
+in the default repository:
+
+1. [Open the repository in HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=Triskae&repository=ha_ocea_smart_building&category=integration)
+2. Select **Download**
+3. Restart Home Assistant
 
 ### Manual
 
@@ -217,12 +234,14 @@ information; review logs before sharing them.
 In Settings → Devices & Services, open Ocea Smart Building and select
 **Delete** from the integration menu. This removes its configuration and
 entities from Home Assistant; it does not delete your Ocea account.
-If installed through HACS, uninstall it there as well and restart Home Assistant
-to remove the integration files.
+Then uninstall it from **Settings** → **Marketplace** (or from HACS on Home
+Assistant 2026.10 and below) and restart Home Assistant to remove the
+integration files.
 
 <!-- Badge references -->
-[hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
-[hacs-url]: https://github.com/hacs/integration
+[marketplace-badge]: https://img.shields.io/badge/Home%20Assistant-Marketplace-41BDF5.svg?logo=home-assistant&logoColor=white
+[marketplace-url]: https://my.home-assistant.io/redirect/marketplace_repository/?owner=Triskae&repository=ha_ocea_smart_building&category=integration
 [release-badge]: https://img.shields.io/github/v/release/Triskae/ha_ocea_smart_building
 [release-url]: https://github.com/Triskae/ha_ocea_smart_building/releases
-[downloads-badge]: https://img.shields.io/github/downloads/Triskae/ha_ocea_smart_building/total
+[installations-badge]: https://img.shields.io/badge/dynamic/json?color=41BDF5&logo=home-assistant&label=integration%20usage&suffix=%20installs&cacheSeconds=15600&url=https://analytics.home-assistant.io/custom_integrations.json&query=$.ocea_smart_building.total
+[installations-url]: https://analytics.home-assistant.io/custom_integrations.json
