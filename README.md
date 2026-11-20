@@ -10,8 +10,9 @@ Home Assistant integration to monitor water and heating consumption from the [Oc
 
 - Dated cold- and hot-water consumption statistics in m³ for each PDS
   (point of measurement)
-- Dated **CETC heating** statistics in kWh per PDS (`Cetc` in the Ocea API),
-  based on the resident portal's fluid and unit mapping
+- Separate dated cold- and hot-water consumption statistics in m³ per dwelling
+- Dated **CETC heating** statistics in kWh per PDS and dwelling (`Cetc` in
+  the Ocea API), based on the resident portal's fluid and unit mapping
 - Leak detection for each individual water meter
 - Water statistics are compatible with the **Energy dashboard**
 - Automatic Azure AD B2C authentication (no headless browser needed)
@@ -145,9 +146,13 @@ Replace `YOUR_EMAIL` with your Ocea login. The password is not typed into shell
 history, but it can be visible to other users through the process arguments
 while the command runs. Use a trusted machine.
 
-The CLI displays dashboard totals and queries every measurement point (PDS)
-of the first dwelling, including heating and other fluids. By default it
-requests daily granularity from the start of the current month through today.
+The CLI displays dashboard totals, requests dwelling-level consumption for
+each supported fluid advertised by the first dwelling, and queries every
+measurement point (PDS), including heating and other fluids. It reports the
+unit, presence of known fields, and actual readings for each dwelling fluid;
+unexpected fields are counted without displaying their names or values. By
+default it requests daily granularity from the start of the current month
+through today.
 To choose an inclusive interval, add both `--start-date YYYY-MM-DD` and
 `--end-date YYYY-MM-DD`. The default dates use the machine's local calendar;
 the API request expresses each bound at the start or end of the day in UTC.
@@ -157,11 +162,13 @@ The API may return no readings or readings spaced by months even when `Day` is
 requested; the CLI displays only what Ocea actually returns. Daily readings
 are available the following day, so today and future dates are excluded when
 checking for missing readings. A failed PDS is reported without stopping the
-others, and causes a nonzero exit status.
+others, and causes a nonzero exit status. Failure to discover dwelling fluids
+or fetch one dwelling series is also reported without stopping PDS exploration.
 This tool does not import historical data into Home Assistant.
 
-Dates and consumption values are private even when PDS identifiers are omitted.
-Review and anonymize output before sharing it. Do not share token output:
+Dates and consumption values are private even when dwelling and PDS identifiers
+are omitted. Review and anonymize output before sharing it; do not commit it to
+the repository. Do not share token output:
 `--dump-tokens` deliberately displays parts of the authentication tokens.
 
 ### Reconfiguration
@@ -186,17 +193,22 @@ other references before removal. Imported Recorder statistics are not deleted.
 ## Energy dashboard
 
 In Settings → Dashboards → Energy → Water consumption, select the Ocea
-external statistics for the meters you want to monitor. Replace the old Ocea
+external statistics for either the dwelling or its meters. Do not select both
+for the same water consumption: the dwelling series can include those meters
+and would be counted twice. Replace the old Ocea
 sensor sources instead of adding both: otherwise water may be counted twice.
 Home Assistant does not change existing Energy dashboard settings automatically.
 The previous water consumption entities are no longer provided; check dashboards
 and automations that referenced them. Their existing Recorder history is not
 deleted or migrated into the new statistics.
 
-The integration progressively fetches daily water and CETC PDS readings from the later of the
+The integration progressively fetches daily dwelling water and CETC readings
+from the occupation start date, and water and CETC PDS readings from the later of the
 occupation start date and the current meter's installation date, up to 30 days
-per meter and five-hour cycle. A unique current occupation is required; missing
-or ambiguous start dates prevent backfill for that meter. Missing readings are
+per series and five-hour cycle. The dwelling history is requested independently
+of its meters and becomes current as backfill progresses. A unique current
+occupation is required; missing
+or ambiguous start dates prevent backfill. Missing readings are
 not estimated. Once backfill is complete, the integration rechecks imported
 history in rotating periods of up to 30 days, subject to the same five-hour
 request limit. A correction is applied when its period is rechecked; the time
@@ -207,9 +219,12 @@ requested from Ocea.
 Daily dates use the Ocea calendar (`Europe/Paris`) and are assigned to the last
 full hour of that day; they are not hourly measurements. The Home Assistant
 timezone does not affect the statistic ID or the day assigned to a reading. A
-statistic series is identified by the dwelling, PDS and exact Ocea fluid. A
+PDS statistic series is identified by the dwelling, PDS and exact Ocea fluid. A
 replacement device using the same PDS therefore continues that PDS series; a
-different PDS creates a different series.
+different PDS creates a different series. Dwelling series have separate stable
+identifiers derived from the dwelling and fluid. Statistic display names include
+the dwelling identifier, which is visible in Home Assistant and stored in
+Recorder metadata. Existing PDS statistic identifiers and history are retained.
 
 Backfill progress and readings are cached privately in Home Assistant. If the
 cache is missing or invalid, history is reconstructed under the same statistic
@@ -221,14 +236,16 @@ but does not change the PDS statistic ID.
 Home Assistant does not support a fixed or entity price for an external water
 statistic; this integration does not provide a separate cost statistic.
 
-The resident portal identifies the thermal PDS fluid as `Cetc` and maps it to
-kWh. The confirmed daily response contains dated `consommations` values in kWh;
-the integration requires that unit and rejects a different or missing one.
+The resident portal identifies the thermal fluid as `Cetc` and maps it to
+kWh. The confirmed daily PDS response contains dated `consommations` values
+in kWh; dwelling responses use the same expected format. The integration
+requires kWh for both and rejects a different or missing unit.
 Unavailable or invalid data is not imported. An unavailable installation date
 also prevents importing that PDS. Daily values must represent consumption
-rather than cumulative meter indexes. An energy statistic does not establish
-that the heat is electricity or that a specific Energy dashboard section is
-appropriate for it.
+rather than cumulative meter indexes. Dwelling and PDS heating statistics may
+overlap and should not be counted together. An energy statistic does not
+establish that the heat is electricity or that a specific Energy dashboard
+section is appropriate for it.
 
 The former dwelling-level CETC sensor is no longer provided, even when no CETC
 PDS history is available. External statistics are not sensor entities: update

@@ -43,6 +43,10 @@ B2C_TOKEN = f"{B2C_TENANT_PATH}/b2c_1a_signup_signin/oauth2/v2.0/token"
 
 API_BASE = "https://espace-resident-api.ocea-sb.com"
 
+CONSUMPTION_FLUIDS = frozenset(
+    {"EauFroide", "EauChaude", "Rfc", "Cetc", "Cetf", "Electricite", "Gaz"}
+)
+
 UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -337,6 +341,35 @@ def fetch_consumptions(
     return result
 
 
+def fetch_dwelling_fluids(
+    session: requests.Session, access_token: str, local_id: str
+) -> list:
+    """Discover the dwelling's advertised fluids independently of its PDS."""
+    result = api_request(
+        session, access_token, "GET", f"/api/v1/local/{quote(local_id, safe='')}"
+    )
+    if not isinstance(result, dict) or not isinstance(result.get("fluidesRestitues"), list):
+        raise OceaCliError("Invalid dwelling fluids response")
+    return result["fluidesRestitues"]
+
+
+def fetch_dwelling_consumption(
+    session: requests.Session,
+    access_token: str,
+    local_id: str,
+    fluid: str,
+    payload: dict[str, str],
+) -> object:
+    """Fetch consumption for a dwelling and fluid."""
+    return api_request(
+        session,
+        access_token,
+        "POST",
+        f"/api/v1/local/{quote(local_id, safe='')}/conso/{quote(fluid, safe='')}",
+        payload,
+    )
+
+
 def fetch_pds(session: requests.Session, access_token: str, local_id: str) -> list:
     """Discover all measurement points for the selected dwelling."""
     log.debug("Discovering measurement points")
@@ -465,6 +498,32 @@ def display_consumptions(response: object, start: date, end: date, today: date) 
         print("  Returned dates appear monthly; daily availability is not confirmed.")
 
 
+def display_dwelling_consumptions(
+    response: object, start: date, end: date, today: date
+) -> None:
+    """Describe the safe, known fields of an aggregated consumption response."""
+    if not isinstance(response, dict) or not isinstance(response.get("consommations"), list):
+        raise OceaCliError("Invalid consumption response")
+    items = response["consommations"]
+    if not all(isinstance(item, dict) for item in items):
+        raise OceaCliError("Invalid consumption item")
+    known_fields = (
+        "date", "valeur", "isEstimated", "consentement", "type",
+        "fuiteEstimee", "valeurCoefficientee",
+    )
+    print(f"  Reported unit: {display_unit(response.get('unite'))}")
+    print(f"  Readings returned: {len(items)}")
+    if items:
+        for key in known_fields:
+            print(f"  Field {key}: {sum(key in item for item in items)}/{len(items)}")
+        unknown = sum(bool(set(item) - set(known_fields)) for item in items)
+        if unknown:
+            print(f"  Readings with other fields: {unknown}")
+    if set(response) - {"unite", "consommations"}:
+        print("  Response contains other fields.")
+    display_consumptions(response, start, end, today)
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def fluid_label(value: object) -> str:
@@ -473,7 +532,6 @@ def fluid_label(value: object) -> str:
         "EauFroide": "Cold water",
         "EauChaude": "Hot water",
         "Cetc": "Heating (CETC)",
-        "CETC": "Heating (CETC)",
         "Cetf": "Cooling (CETF)",
         "Rfc": "Heating allocation (RFC)",
         "Gaz": "Gas",
@@ -489,7 +547,7 @@ def fluid_label(value: object) -> str:
 
 
 def main(args: argparse.Namespace) -> int:
-    """Display dashboard totals and explore all PDS in the first dwelling."""
+    """Display dwelling and PDS consumption for the first dwelling."""
     today = datetime.now(timezone.utc).astimezone().date()
     start = args.start_date or today.replace(day=1)
     end = args.end_date or today
@@ -530,9 +588,50 @@ def main(args: argparse.Namespace) -> int:
             log.error("Dashboard: network request failed")
             failed = True
 
-        pds_list = fetch_pds(session, access_token, local_id)
         print(f"\nRequested daily granularity: {start.isoformat()} to {end.isoformat()} (inclusive).")
         print("Consumption dates and values are private; review them before sharing.")
+        print("\nDwelling consumption:")
+        try:
+            dwelling_fluids = fetch_dwelling_fluids(session, access_token, local_id)
+        except OceaCliError as err:
+            log.error("Dwelling fluids: %s", err)
+            failed = True
+            dwelling_fluids = None
+        except requests.RequestException:
+            log.error("Dwelling fluids: network request failed")
+            failed = True
+            dwelling_fluids = None
+
+        seen_fluids: set[str] = set()
+        for item in dwelling_fluids or []:
+            if not isinstance(item, dict) or not isinstance(item.get("fluide"), str):
+                log.error("Dwelling fluids: invalid fluid data")
+                failed = True
+                continue
+            fluid = item["fluide"]
+            if fluid not in CONSUMPTION_FLUIDS:
+                print("  Skipping an unsupported dwelling fluid.")
+                continue
+            if fluid in seen_fluids:
+                continue
+            seen_fluids.add(fluid)
+            label = fluid_label(fluid)
+            print(f"\nDwelling: {label} ({fluid})")
+            try:
+                response = fetch_dwelling_consumption(
+                    session, access_token, local_id, fluid, payload
+                )
+                display_dwelling_consumptions(response, start, end, today)
+            except OceaCliError as err:
+                log.error("Dwelling %s: %s", label, err)
+                failed = True
+            except requests.RequestException:
+                log.error("Dwelling %s: network request failed", label)
+                failed = True
+        if dwelling_fluids == []:
+            print("  No dwelling fluids available.")
+
+        pds_list = fetch_pds(session, access_token, local_id)
         if not pds_list:
             print("No PDS found for this dwelling.")
         for index, pds in enumerate(pds_list, 1):
@@ -561,7 +660,7 @@ def main(args: argparse.Namespace) -> int:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Explore Ocea Smart Building consumption by measurement point",
+        description="Explore Ocea Smart Building dwelling and measurement-point consumption",
     )
     parser.add_argument("--email", required=True)
     parser.add_argument("--password", required=True)

@@ -268,6 +268,47 @@ async def test_dwelling_and_pds_ids_are_escaped_in_paths(aiohttp_server, monkeyp
     ]
 
 
+async def test_dwelling_consumption_contract(aiohttp_server, monkeypatch):
+    """Fetch advertised fluids and a dated aggregate using escaped path segments."""
+    state = {"api_response": {"fluidesRestitues": [{"fluide": "EauFroide"}]}}
+    await _server(aiohttp_server, monkeypatch, state)
+    payload = {"debut": "2024-01-01", "fin": "2024-01-02", "granularity": "Day"}
+    async with aiohttp.ClientSession() as session:
+        client = _client(session)
+        client._auth._access_token = "token-placeholder"
+        assert await client.get_dwelling_fluids("local/one") == ["EauFroide"]
+        state["api_response"] = {
+            "unite": "m3",
+            "consommations": [
+                {"date": "2024-01-01", "valeur": 0.5, "type": "ConsommationEauResponse"}
+            ],
+        }
+        series = await client.get_dwelling_consumption("local/one", "fluid/one", payload)
+    assert series.unit == "m3"
+    assert str(series.items[0].value) == "0.5"
+    assert state["payload"] == payload
+    assert state["raw_paths"] == [
+        "/api/v1/local/local%2Fone",
+        "/api/v1/local/local%2Fone/conso/fluid%2Fone",
+    ]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [{}, {"fluidesRestitues": None}, {"fluidesRestitues": [None]},
+     {"fluidesRestitues": [{"fluide": None}]}],
+)
+async def test_invalid_dwelling_fluids(aiohttp_server, monkeypatch, response):
+    """Do not treat malformed fluid discovery as an empty dwelling."""
+    state = {"api_response": response}
+    await _server(aiohttp_server, monkeypatch, state)
+    async with aiohttp.ClientSession() as session:
+        client = _client(session)
+        client._auth._access_token = "token-placeholder"
+        with pytest.raises(OceaApiError, match="Invalid dwelling fluid"):
+            await client.get_dwelling_fluids("local")
+
+
 async def test_dwelling_access_and_details(aiohttp_server, monkeypatch):
     state = {"api_response": []}
     await _server(aiohttp_server, monkeypatch, state)

@@ -17,6 +17,7 @@ from custom_components.ocea_smart_building.ocea.models import (
     OceaConsumptionSeries,
     OceaDashboardData,
     OceaDwellingDetails,
+    OceaDwellingFluids,
     OceaOccupation,
     OceaResident,
     OceaRfcConsumptionData,
@@ -296,6 +297,7 @@ def test_invalid_resident_fields_raise(data: dict[str, object]) -> None:
     ("data", "expected"),
     [
         ({"local": {}}, None),
+        ({"local": {}, "fluidesRestitues": None}, None),
         ({"local": {"adresse": {}}}, OceaAddress()),
         (
             {"local": {"adresse": {
@@ -325,3 +327,31 @@ def test_dwelling_address(data: dict[str, object], expected: OceaAddress | None)
 def test_invalid_dwelling_details_raise(data: dict[str, object]) -> None:
     with pytest.raises(OceaApiError):
         OceaDwellingDetails.from_api(data)
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({"fluidesRestitues": []}, ()),
+        (
+            {"local": None, "fluidesRestitues": [
+                {"fluide": "EauFroide"}, {"fluide": "Cetc"}, {"fluide": "Other"}
+            ]},
+            ("EauFroide", "Cetc", "Other"),
+        ),
+    ],
+)
+def test_dwelling_fluids(data: dict[str, object], expected: tuple[str, ...]) -> None:
+    """Map all advertised fluids independently of the address."""
+    assert OceaDwellingFluids.from_api(data).fluids == expected
+
+
+@pytest.mark.parametrize(
+    "data",
+    [{}, {"fluidesRestitues": None}, {"fluidesRestitues": [None]},
+     {"fluidesRestitues": [{}]}, {"fluidesRestitues": [{"fluide": None}]}],
+)
+def test_invalid_dwelling_fluids_raise(data: dict[str, object]) -> None:
+    """Reject malformed discovery data instead of treating it as an empty list."""
+    with pytest.raises(OceaApiError, match="Invalid dwelling fluid"):
+        OceaDwellingFluids.from_api(data)
