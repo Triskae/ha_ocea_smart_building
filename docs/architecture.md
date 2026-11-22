@@ -59,7 +59,8 @@ C4Component
     Component(configFlow, "Config flow", "config_flow.py", "Validates credentials and manages setup, reauthentication, and reconfiguration")
     Component(entrySetup, "Entry lifecycle", "__init__.py", "Creates entry-scoped client resources and loads or unloads platforms")
     Component(coordinator, "Data update coordinator", "coordinator.py", "Discovers meters, polls Ocea, and normalizes typed readings")
-    Component(entities, "Entity platforms", "sensor.py, binary_sensor.py, entity.py", "Expose dwelling totals, meter readings, and leak estimates")
+    Component(history, "History manager", "history.py", "Backfills dwelling and PDS statistics and updates corrected readings independently of current-data polling")
+    Component(entities, "Entity platforms", "sensor.py, binary_sensor.py, entity.py", "Expose water leak estimates and alerts")
     Component(apiClient, "Ocea API client and models", "ocea/client.py, ocea/models.py", "Makes asynchronous API requests and validates response shapes")
     Component(authentication, "B2C authentication", "ocea/auth.py", "Performs browser-compatible authorization, PKCE, and token refresh")
   }
@@ -77,6 +78,10 @@ C4Component
   Rel(authentication, b2c, "Runs the authorization-code flow", "HTTPS")
   Rel(apiClient, oceaApi, "Reads resident and consumption endpoints", "HTTPS/JSON")
   Rel(coordinator, entities, "Publishes normalized coordinator data")
+  Rel(entrySetup, history, "Starts and scopes")
+  Rel(history, coordinator, "Reads current validated readings without scheduling from refreshes")
+  Rel(history, apiClient, "Fetches dated PDS readings")
+  Rel(history, homeAssistant, "Imports external Recorder statistics")
 ```
 
 Home Assistant lifecycle and presentation concerns stay in the integration
@@ -106,6 +111,11 @@ local times are invalid rather than guessed. When the latest calendar-only
 reading cannot be ordered against a timestamp on the same Paris day, its
 latest-reading metadata is unavailable.
 
+Occupation timestamps retain their supplied offset: dwelling selection compares
+instants, while history uses the calendar dates written by the API for occupation
+start and end. Meter installation dates retain their existing calendar-date
+interpretation.
+
 The coordinator ignores individual consumption readings with invalid or
 missing dates or values, warns without logging their contents, and aggregates
 the remaining values. A partial total can understate actual consumption; a
@@ -113,9 +123,10 @@ nonempty series with no valid readings is unavailable. An empty series keeps
 its existing behavior. Latest-reading metadata is unavailable when an invalid
 date prevents ordering or the latest reading is invalid, so a stale leak
 estimate cannot be reported as current. Numeric values are converted to floats
-at the sensor boundary to preserve Home Assistant's exposed values. The dashboard accepts
-the exact API fluid code `Cetc` for the existing `cetc` sensor; unsupported
-fluid codes are ignored with a sanitized warning.
+at the sensor boundary to preserve Home Assistant's exposed values. The dashboard
+accepts the exact API fluid code `Cetc`; unsupported fluid codes are ignored with
+a sanitized warning. History synchronization only advances when all dated
+readings in a response are valid, even if the coordinator has a partial total.
 
 The client owns authentication state but is not bound to a dwelling. Each
 dwelling-specific call receives its local ID explicitly, and POST methods
@@ -136,13 +147,68 @@ Reconfiguration keeps the stored password hidden and applies changes through
 
 When an entry is set up, the integration creates its own Home Assistant-managed
 HTTP session and API client, then starts the coordinator. The first coordinator
-refresh discovers the dwelling's supported water meters and associated device
+refresh discovers the dwelling's supported water and CETC meters and associated device
 metadata. Meter discovery is cached for the loaded entry. The coordinator then
 fetches dwelling totals and each discovered meter's current-month readings on
-the five-hour interval. Entity platforms expose the resulting data to Home
-Assistant. A meter-specific read failure does not discard successful readings
-from other meters or the dwelling totals; missing leak estimates remain
-unavailable rather than being reported as “no leak.”
+the five-hour interval. Entity platforms expose leak estimates and alerts to Home
+Assistant, while the history manager imports dated water and CETC PDS
+readings and separate dwelling water and CETC readings as external statistics.
+Dwelling fluid discovery does not depend on PDS discovery and uses the same
+supported-fluid metadata. The front-end identifies the thermal fluid as `Cetc` and
+maps it to kWh; the client classifies generic, water, RFC and unclassified
+consumption responses while retaining Ocea's wire fields. A meter-specific
+read failure does not discard successful readings from other meters or the
+dwelling totals; missing leak estimates remain unavailable rather than being
+reported as “no leak.”
+
+Current-month requests and historical timestamps use `Europe/Paris` as the
+integration's calendar convention, independent of Home Assistant's configured
+timezone. The actual timezone of Ocea's daily aggregation is not established.
+Each external statistic ID is derived from the configured dwelling ID, PDS ID and
+exact supported fluid code. It does not depend on the config-entry ID, cache
+generation, history start date, device serial number or timezone. The private
+Store holds progress and daily values, not the statistic identity. Dwelling
+water and CETC series use separate stable IDs derived from the dwelling ID and fluid,
+and their history requests start at the later of the active occupation and the
+earliest valid installation date among the discovered meters of that fluid.
+The coordinator retains one selected device per PDS, so other devices returned
+for the same PDS are not considered. Missing or invalid installation dates are
+warned about; with partially valid dates the minimum of those dates is used, which
+may be later than the true earliest installation. If no valid date or matching
+meter is available, requests fall back to the occupation start with a warning.
+Meter discovery remains cached until the integration is reloaded. If a request
+bound changes, stored values are retained while dwelling and PDS requests respect
+their current bounds, including after a selected meter is replaced. Display names
+include the dwelling ID. If the Store is absent or invalid, the manager can
+rebuild under the same ID;
+Recorder rows are updated at matching timestamps and are never reset by cache
+reconstruction.
+
+The history manager is an entry-scoped background service, separate from the
+five-hour data coordinator. It backfills in inclusive periods of up to 90 days,
+reducing the persisted per-series range after an HTTP 413 response. Concurrent
+history requests are capped at three per entry. Network, rate-limit, server,
+and other API failures leave the cursor in place and use a persisted exponential
+retry delay; a failed series does not block the others.
+
+The manager requests history only through the last completed day in its
+`Europe/Paris` calendar.
+Once a series catches up, it checks a three-day overlap daily and revisits older
+periods weekly to find late corrections. When Ocea returns a changed daily
+value, the manager recalculates and republishes cumulative sums from the first
+changed day onward. A missing date is not synthesized as zero or interpreted as
+a deletion. The API's maximum supported period remains an empirical limit; 90
+days is the initial request target, not a guarantee about Ocea's server.
+Requests currently encode each inclusive integration-side period with a midnight
+UTC start and a `23:59:59.999Z` end. The observed portal uses midnight UTC for
+both bounds, but the server's end-boundary semantics and data consolidation
+cannot be established from the available offline examples.
+
+The portal maps `Cetc` to kWh and sums consumption values for equivalences.
+The integration treats daily values from both dwelling and PDS endpoints as
+consumption, not cumulative indexes, and accumulates each series separately.
+The available evidence does not fully establish the server semantics for both
+endpoints; dwelling and PDS totals may overlap and must not be added together.
 
 ## Integration modules
 
@@ -151,8 +217,9 @@ unavailable rather than being reported as “no leak.”
 | `__init__.py` | Config-entry lifecycle: create the entry-scoped HTTP session and API client, perform the first coordinator refresh, forward platforms, and unload them. |
 | `config_flow.py` | Initial setup, reauthentication, and reconfiguration. Validate credentials with the client, derive the dwelling ID and title from resident data, and persist the validated config. |
 | `coordinator.py` | Discover PDS/meter metadata at startup; fetch and normalize dwelling totals and per-meter readings; expose a typed coordinator payload and translate API failures to Home Assistant update/auth errors. |
+| `history.py` | Run an entry-scoped backfill and daily history service for dwelling and PDS water and CETC readings, persist per-series progress, and enqueue external Recorder statistics. |
 | `entity.py` | Shared coordinator entity base, device metadata, and stable unique-ID construction for dwelling and meter entities. |
-| `sensor.py` | Dwelling-level and per-meter water/heating sensors, plus estimated-leak measurement sensors when Ocea provides estimates. |
+| `sensor.py` | Estimated-leak sensors for water meters when Ocea provides estimates. |
 | `binary_sensor.py` | Per-meter leak state, derived from the latest estimated-leak value. Missing estimates are represented as unavailable, not as “no leak.” |
 | `const.py` | Integration domain, version/User-Agent, config keys, polling interval, and fluid-to-sensor mapping. |
 | `strings.json`, `translations/` | Config-flow, entity, and device translations. Keep the source and English/French translations aligned when translated keys change. |
@@ -187,6 +254,7 @@ in `test_config_flow.py` and `test_setup.py`; coordinator and sensor behavior in
 - Entity unique IDs are derived from the dwelling and, for meter entities, the
   PDS identifier. Changing this scheme can orphan existing entities; treat it
   as a migration, not a cosmetic refactor.
+- Config-entry unique IDs are dwelling IDs, not account email addresses.
 - PDS discovery is cached for the lifetime of the loaded entry. Reload the
   integration to synchronize meter additions or removals.
 - Keep the polling interval at five hours unless a separately requested and

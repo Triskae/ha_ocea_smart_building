@@ -9,6 +9,9 @@
     "@triskae"
   ],
   "config_flow": true,
+  "dependencies": [
+    "recorder"
+  ],
   "documentation": "https://github.com/Triskae/ha_ocea_smart_building",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/Triskae/ha_ocea_smart_building/issues",

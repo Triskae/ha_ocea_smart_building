@@ -2,24 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import UnitOfEnergy, UnitOfVolume
+from homeassistant.const import UnitOfVolume
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_LOCAL_ID, WATER_FLUID_SENSOR_KEYS
+from .const import CONF_LOCAL_ID, PDS_FLUID_METADATA
 from .coordinator import OceaConfigEntry, OceaDataUpdateCoordinator
 from .entity import (
     OceaEntity,
-    local_device_info,
-    local_entity_unique_id,
     meter_device_info,
     meter_entity_unique_id,
 )
@@ -28,47 +24,9 @@ from .ocea import OceaMeter
 PARALLEL_UPDATES = 0
 
 
-@dataclass(frozen=True, kw_only=True)
-class OceaSensorEntityDescription(SensorEntityDescription):
-    """Describe an Ocea sensor entity."""
-
-    data_key: str
-
-
-SENSOR_TYPES: tuple[OceaSensorEntityDescription, ...] = (
-    OceaSensorEntityDescription(
-        key="eau_froide",
-        data_key="eau_froide",
-        translation_key="eau_froide",
-        native_unit_of_measurement=UnitOfVolume.CUBIC_METERS,
-        device_class=SensorDeviceClass.WATER,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        icon="mdi:water",
-        suggested_display_precision=2,
-    ),
-    OceaSensorEntityDescription(
-        key="eau_chaude",
-        data_key="eau_chaude",
-        translation_key="eau_chaude",
-        native_unit_of_measurement=UnitOfVolume.CUBIC_METERS,
-        device_class=SensorDeviceClass.WATER,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        icon="mdi:water-thermometer",
-        suggested_display_precision=2,
-    ),
-    OceaSensorEntityDescription(
-        key="cetc",
-        data_key="cetc",
-        translation_key="cetc",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        icon="mdi:radiator",
-        suggested_display_precision=2,
-    ),
-    OceaSensorEntityDescription(
+SENSOR_TYPES: tuple[SensorEntityDescription, ...] = (
+    SensorEntityDescription(
         key="fuite",
-        data_key="fuite",
         translation_key="fuite",
         native_unit_of_measurement=UnitOfVolume.CUBIC_METERS,
         device_class=SensorDeviceClass.WATER,
@@ -89,38 +47,13 @@ async def async_setup_entry(
     local_id = config_entry.data[CONF_LOCAL_ID]
     descriptions = {description.key: description for description in SENSOR_TYPES}
 
-    entities: list[OceaWaterSensor] = []
-    for description in SENSOR_TYPES:
-        if description.key == "fuite":
-            continue
-        if coordinator.data and description.data_key in coordinator.data.totals:
-            entities.append(
-                OceaWaterSensor(
-                    coordinator=coordinator,
-                    description=description,
-                    local_id=local_id,
-                )
-            )
-
+    entities: list[OceaMeterSensor] = []
     if coordinator.data:
-        fluid_descriptions = {
-            fluide: descriptions[key]
-            for fluide, key in WATER_FLUID_SENSOR_KEYS.items()
-        }
         for meter in coordinator.data.meters.values():
-            pds = meter.meter.pds
-            meter_description = fluid_descriptions.get(pds.fluid)
-            if meter_description is None:
-                continue
-            entities.append(
-                OceaMeterSensor(
-                    coordinator=coordinator,
-                    description=meter_description,
-                    local_id=local_id,
-                    meter=meter.meter,
-                )
-            )
-            if meter.estimated_leak is not None:
+            if (
+                PDS_FLUID_METADATA[meter.meter.pds.fluid].supports_water_leak_sensors
+                and meter.estimated_leak is not None
+            ):
                 entities.append(
                     OceaMeterSensor(
                         coordinator=coordinator,
@@ -135,7 +68,8 @@ async def async_setup_entry(
     leak_entity_keys = {
         reading.meter.identifier
         for reading in (coordinator.data.meters.values() if coordinator.data else ())
-        if reading.estimated_leak is not None
+        if PDS_FLUID_METADATA[reading.meter.pds.fluid].supports_water_leak_sensors
+        and reading.estimated_leak is not None
     }
 
     @callback
@@ -145,7 +79,12 @@ async def async_setup_entry(
         if coordinator.data is None:
             return
         for reading in coordinator.data.meters.values():
-            if reading.estimated_leak is None:
+            if (
+                not PDS_FLUID_METADATA[
+                    reading.meter.pds.fluid
+                ].supports_water_leak_sensors
+                or reading.estimated_leak is None
+            ):
                 continue
             meter = reading.meter
             if meter.identifier in leak_entity_keys:
@@ -167,45 +106,21 @@ async def async_setup_entry(
     )
 
 
-class OceaWaterSensor(OceaEntity, SensorEntity):
-    """Representation of an Ocea consumption sensor."""
+class OceaMeterSensor(OceaEntity, SensorEntity):
+    """Representation of an estimated leak for one water meter."""
 
-    entity_description: OceaSensorEntityDescription
-
-    def __init__(
-        self,
-        coordinator: OceaDataUpdateCoordinator,
-        description: OceaSensorEntityDescription,
-        local_id: str,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator)
-        self.entity_description = description
-        self._local_id = local_id
-        self._attr_unique_id = local_entity_unique_id(local_id, description.key)
-        self._attr_device_info = local_device_info(local_id)
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the sensor value."""
-        if self.coordinator.data is None:
-            return None
-        value = self.coordinator.data.totals.get(self.entity_description.data_key)
-        return float(value) if value is not None else None
-
-
-class OceaMeterSensor(OceaWaterSensor):
-    """Representation of one PDS consumption sensor."""
+    entity_description: SensorEntityDescription
 
     def __init__(
         self,
         coordinator: OceaDataUpdateCoordinator,
-        description: OceaSensorEntityDescription,
+        description: SensorEntityDescription,
         local_id: str,
         meter: OceaMeter,
     ) -> None:
         """Initialize an individual meter sensor."""
-        super().__init__(coordinator, description, local_id)
+        super().__init__(coordinator)
+        self.entity_description = description
         self._meter = meter
         self._attr_unique_id = meter_entity_unique_id(
             local_id, meter, description.key
@@ -214,11 +129,11 @@ class OceaMeterSensor(OceaWaterSensor):
 
     @property
     def native_value(self) -> float | None:
-        """Return this meter's current-month consumption."""
+        """Return this meter's estimated leak."""
         if self.coordinator.data is None:
             return None
         reading = self.coordinator.data.meters.get(self._meter.identifier)
         if reading is None:
             return None
-        value = reading.estimated_leak if self.entity_description.key == "fuite" else reading.value
+        value = reading.estimated_leak
         return float(value) if value is not None else None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 from unittest.mock import AsyncMock
@@ -65,6 +66,7 @@ async def _server(aiohttp_server, monkeypatch, state):
         )
 
     async def api(request):
+        state.setdefault("raw_paths", []).append(request.raw_path)
         state.setdefault("requests", []).append(
             (request.method, request.path, request.headers.get("Authorization"))
         )
@@ -156,6 +158,47 @@ async def test_second_unauthorized_response_does_not_retry(aiohttp_server, monke
     assert len(state["token_forms"]) == 1
 
 
+async def test_concurrent_unauthorized_requests_share_token_refresh(
+    aiohttp_server, monkeypatch
+):
+    """Concurrent 401s refresh once and retry with the shared new token."""
+    state = {"api_statuses": [401, 401, 200, 200]}
+    await _server(aiohttp_server, monkeypatch, state)
+    async with aiohttp.ClientSession() as session:
+        client = _client(session)
+        client._auth._access_token = "old-placeholder"
+        client._auth._refresh_token = "refresh-placeholder"
+        await asyncio.gather(
+            client._api_request("GET", "/api/test"),
+            client._api_request("GET", "/api/test"),
+        )
+
+    assert len(state["token_forms"]) == 1
+    assert [request[2] for request in state["requests"]] == [
+        "Bearer old-placeholder",
+        "Bearer old-placeholder",
+        "Bearer new-placeholder",
+        "Bearer new-placeholder",
+    ]
+
+
+async def test_concurrent_initial_requests_share_authentication(
+    aiohttp_server, monkeypatch
+):
+    """Concurrent first requests do not start duplicate B2C logins."""
+    state = {"api_statuses": [200, 200]}
+    await _server(aiohttp_server, monkeypatch, state)
+    async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as session:
+        client = _client(session)
+        await asyncio.gather(
+            client._api_request("GET", "/api/test"),
+            client._api_request("GET", "/api/test"),
+        )
+
+    assert len(state["token_forms"]) == 1
+    assert len(state["requests"]) == 2
+
+
 @pytest.mark.parametrize(
     ("state", "error"),
     [
@@ -216,14 +259,96 @@ async def test_refresh_without_access_token_fails(aiohttp_server, monkeypatch):
             await client._auth.refresh_access_token()
 
 
-async def test_get_consumptions_targets_configured_dwelling(aiohttp_server, monkeypatch):
+async def test_client_targets_each_requested_dwelling(aiohttp_server, monkeypatch):
+    """One authenticated client can address distinct dwellings."""
     state = {"api_response": []}
     await _server(aiohttp_server, monkeypatch, state)
     async with aiohttp.ClientSession() as session:
         client = _client(session)
         client._auth._access_token = "token-placeholder"
         assert await client.get_consumptions("local-123") == []
-    assert state["requests"][0][1] == "/api/v1/local/local-123/dashboard/consos"
+        assert await client.get_pds("local-456") == []
+        state["api_response"] = {}
+        payload = {
+            "debut": "2026-09-01T00:00:00.000Z",
+            "fin": "2026-09-30T23:59:59.999Z",
+            "granularity": "Day",
+        }
+        assert (await client.get_pds_consumption("local-123", "pds-1", payload)).raw == {}
+        assert (await client.get_pds_consumption("local-456", "pds-2", payload)).raw == {}
+    assert [request[1] for request in state["requests"]] == [
+        "/api/v1/local/local-123/dashboard/consos",
+        "/api/v1/local/local-456/pds",
+        "/api/v1/local/local-123/pds/pds-1/conso",
+        "/api/v1/local/local-456/pds/pds-2/conso",
+    ]
+
+
+async def test_dwelling_and_pds_ids_are_escaped_in_paths(aiohttp_server, monkeypatch):
+    """Identifiers are treated as path segments rather than URL syntax."""
+    state = {"api_response": []}
+    await _server(aiohttp_server, monkeypatch, state)
+    async with aiohttp.ClientSession() as session:
+        client = _client(session)
+        client._auth._access_token = "token-placeholder"
+        await client.get_consumptions("local/one?x")
+        await client.get_pds("local/one?x")
+        state["api_response"] = {}
+        await client.get_pds_consumption(
+            "local/one?x",
+            "pds/two?x",
+            {
+                "debut": "2026-09-01T00:00:00.000Z",
+                "fin": "2026-09-30T23:59:59.999Z",
+                "granularity": "Day",
+            },
+        )
+    assert state["raw_paths"] == [
+        "/api/v1/local/local%2Fone%3Fx/dashboard/consos",
+        "/api/v1/local/local%2Fone%3Fx/pds",
+        "/api/v1/local/local%2Fone%3Fx/pds/pds%2Ftwo%3Fx/conso",
+    ]
+
+
+async def test_dwelling_consumption_contract(aiohttp_server, monkeypatch):
+    """Fetch advertised fluids and a dated aggregate using escaped path segments."""
+    state = {"api_response": {"fluidesRestitues": [{"fluide": "EauFroide"}]}}
+    await _server(aiohttp_server, monkeypatch, state)
+    payload = {"debut": "2024-01-01", "fin": "2024-01-02", "granularity": "Day"}
+    async with aiohttp.ClientSession() as session:
+        client = _client(session)
+        client._auth._access_token = "token-placeholder"
+        assert await client.get_dwelling_fluids("local/one") == ["EauFroide"]
+        state["api_response"] = {
+            "unite": "m3",
+            "consommations": [
+                {"date": "2024-01-01", "valeur": 0.5, "type": "ConsommationEauResponse"}
+            ],
+        }
+        series = await client.get_dwelling_consumption("local/one", "fluid/one", payload)
+    assert series.unit == "m3"
+    assert str(series.items[0].value) == "0.5"
+    assert state["payload"] == payload
+    assert state["raw_paths"] == [
+        "/api/v1/local/local%2Fone",
+        "/api/v1/local/local%2Fone/conso/fluid%2Fone",
+    ]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [{}, {"fluidesRestitues": None}, {"fluidesRestitues": [None]},
+     {"fluidesRestitues": [{"fluide": None}]}],
+)
+async def test_invalid_dwelling_fluids(aiohttp_server, monkeypatch, response):
+    """Do not treat malformed fluid discovery as an empty dwelling."""
+    state = {"api_response": response}
+    await _server(aiohttp_server, monkeypatch, state)
+    async with aiohttp.ClientSession() as session:
+        client = _client(session)
+        client._auth._access_token = "token-placeholder"
+        with pytest.raises(OceaApiError, match="Invalid dwelling fluid"):
+            await client.get_dwelling_fluids("local")
 
 
 async def test_dwelling_access_and_details(aiohttp_server, monkeypatch):

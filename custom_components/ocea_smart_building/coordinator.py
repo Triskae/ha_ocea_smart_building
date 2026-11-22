@@ -16,10 +16,9 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_LOCAL_ID,
-    DASHBOARD_FLUID_SENSOR_KEYS,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
-    WATER_FLUID_SENSOR_KEYS,
+    PDS_FLUID_METADATA,
 )
 from .ocea import OceaApiClient, OceaApiError, OceaAuthError, OceaMeter
 from .ocea.const import OCEA_TIME_ZONE
@@ -35,6 +34,15 @@ from .ocea.models import (
 
 
 @dataclass(frozen=True, slots=True)
+class OceaDailyConsumption:
+    """One dated Ocea consumption value."""
+
+    day: date
+    value: Decimal
+    consent: bool | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class OceaMeterReading:
     """Current-month consumption for one Ocea meter."""
 
@@ -45,6 +53,7 @@ class OceaMeterReading:
     estimated_leak: Decimal | None = None
     consent: bool | None = None
     response_type: str | None = None
+    daily_consumptions: tuple[OceaDailyConsumption, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,8 +67,28 @@ class OceaData:
 _LOGGER = logging.getLogger(__name__)
 
 
-def _current_month_payload(today: date) -> OceaConsumptionRequest:
+def daily_consumptions_from_series(
+    response: OceaConsumptionSeries,
+) -> tuple[OceaDailyConsumption, ...] | None:
+    """Convert complete typed readings to Ocea calendar days."""
+    if "consommations" not in response.raw:
+        return None
+    readings: list[OceaDailyConsumption] = []
+    for item in response.items:
+        if item.date is None or item.value is None:
+            return None
+        day = (
+            item.date.astimezone(OCEA_TIME_ZONE).date()
+            if isinstance(item.date, datetime)
+            else item.date
+        )
+        readings.append(OceaDailyConsumption(day, item.value, item.consent))
+    return tuple(readings)
+
+
+def _current_month_payload(now: datetime) -> OceaConsumptionRequest:
     """Build the daily consumption request for the current local month."""
+    today = now.astimezone(OCEA_TIME_ZONE).date()
     return {
         "debut": f"{today.replace(day=1).isoformat()}T00:00:00.000Z",
         "fin": f"{today.isoformat()}T23:59:59.999Z",
@@ -128,6 +157,7 @@ def _build_meter_data(meter: OceaMeter, response: OceaConsumptionSeries) -> Ocea
         estimated_leak=estimated_leak,
         consent=latest_item.consent if latest_item is not None else None,
         response_type=latest_item.response_type if latest_item is not None else None,
+        daily_consumptions=daily_consumptions_from_series(response),
     )
 
 
@@ -164,7 +194,7 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
         self._meters: dict[str, OceaMeter] = {}
 
     async def _async_setup(self) -> None:
-        """Discover the dwelling's water meters once, before the first refresh."""
+        """Discover supported dwelling meters once, before the first refresh."""
         try:
             self._meters = await self._discover_meters()
         except Exception as err:
@@ -175,7 +205,7 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
         _LOGGER.debug("Ocea coordinator: starting data fetch")
         try:
             raw_data = await self.client.get_consumptions(self._local_id)
-            payload = _current_month_payload(dt_util.now().date())
+            payload = _current_month_payload(dt_util.now())
             meters = await self._fetch_readings(payload)
         except Exception as err:
             raise _as_update_error(err) from err
@@ -189,11 +219,11 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
         return data
 
     async def _discover_meters(self) -> dict[str, OceaMeter]:
-        """Discover the configured dwelling's water meters."""
+        """Discover the configured dwelling's supported meters."""
         pds_data = [
             item
             for item in await self.client.get_pds(self._local_id)
-            if item.id and item.fluid in WATER_FLUID_SENSOR_KEYS
+            if item.id and item.fluid is not None and item.fluid in PDS_FLUID_METADATA
         ]
         payload: OceaDevicesRequest = {"pdsIds": [str(item.id) for item in pds_data]}
         appareils = await self.client.get_appareils(payload)
@@ -218,7 +248,7 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
             except OceaAuthError:
                 raise
             except (OceaApiError, ClientError, TimeoutError):
-                _LOGGER.warning("Unable to update one water meter")
+                _LOGGER.warning("Unable to update one Ocea meter")
         return readings
 
     @staticmethod
@@ -226,14 +256,14 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
         """Map the dwelling's dashboard consumption entries to sensor keys."""
         totals: dict[str, Decimal] = {}
         for item in raw_data:
-            key = DASHBOARD_FLUID_SENSOR_KEYS.get(item.fluid)
-            if key is None:
+            fluid_metadata = PDS_FLUID_METADATA.get(item.fluid)
+            if fluid_metadata is None:
                 _LOGGER.warning("Ignoring unsupported dashboard fluid")
                 continue
             if item.value is None:
                 _LOGGER.warning("Ignoring invalid dashboard consumption value")
                 continue
-            totals[key] = item.value
+            totals[fluid_metadata.dashboard_sensor_key] = item.value
         return totals
 
 

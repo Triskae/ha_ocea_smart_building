@@ -53,8 +53,8 @@
       "unknown": "Erreur inattendue"
     },
     "abort": {
-      "already_configured": "Ce compte est déjà configuré",
-      "unique_id_mismatch": "Utilisez le compte Ocea déjà configuré pour la ré-authentification.",
+      "already_configured": "Ce logement est déjà configuré",
+      "unique_id_mismatch": "Le logement ne correspond pas à celui déjà configuré.",
       "reconfigure_successful": "La reconfiguration a réussi",
       "reauth_successful": "La ré-authentification a réussi"
     }
@@ -77,9 +77,6 @@
       },
       "eau_chaude": {
         "name": "Eau chaude"
-      },
-      "cetc": {
-        "name": "Chauffage thermique"
       },
       "fuite": {
         "name": "Fuite estimée"

@@ -17,6 +17,7 @@ from custom_components.ocea_smart_building.ocea.models import (
     OceaConsumptionSeries,
     OceaDashboardData,
     OceaDwellingDetails,
+    OceaDwellingFluids,
     OceaOccupation,
     OceaResident,
     OceaRfcConsumptionData,
@@ -59,6 +60,13 @@ def test_consumption_values_are_finite_decimals(raw, expected) -> None:
          datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone(timedelta(hours=2)))),
         ("2026-03-29T02:30:00", None),
         ("2026-10-25T02:30:00", None),
+        ("2026-03-29T01:59:59", datetime(2026, 3, 29, 1, 59, 59, tzinfo=ZoneInfo("Europe/Paris"))),
+        ("2026-03-29T03:00:00", datetime(2026, 3, 29, 3, tzinfo=ZoneInfo("Europe/Paris"))),
+        ("2026-10-25T02:30:00+02:00", datetime(2026, 10, 25, 2, 30, tzinfo=timezone(timedelta(hours=2)))),
+        ("2026-10-25T02:30:00+01:00", datetime(2026, 10, 25, 2, 30, tzinfo=timezone(timedelta(hours=1)))),
+        ("2024-02-29", date(2024, 2, 29)),
+        ("2025-02-29", None),
+        ("2024-12-31T23:59:59Z", datetime(2024, 12, 31, 23, 59, 59, tzinfo=timezone.utc)),
         ("invalid", None),
         (None, None),
         (False, None),
@@ -259,6 +267,29 @@ def test_occupation_status(start: object, end: object, expected: OccupationStatu
     assert occupation.status(datetime(2026, 1, 1, tzinfo=timezone.utc)) == expected
 
 
+def test_occupation_preserves_offset_and_compares_instants() -> None:
+    """Keep the original calendar day while comparing aware instants."""
+    occupation = OceaOccupation.from_api({
+        "dateDebut": "2026-01-01T00:00:00+01:00",
+        "dateFin": "2026-01-02T00:00:00+01:00",
+    })
+    assert occupation.start is not None
+    assert occupation.start.date() == date(2026, 1, 1)
+    assert occupation.start.utcoffset() == timedelta(hours=1)
+    assert occupation.status(datetime(2025, 12, 31, 22, 59, tzinfo=timezone.utc)) is (
+        OccupationStatus.FUTURE
+    )
+    assert occupation.status(datetime(2025, 12, 31, 23, tzinfo=timezone.utc)) is (
+        OccupationStatus.UNKNOWN
+    )
+    assert occupation.status(datetime(2026, 1, 1, 0, tzinfo=timezone.utc)) is (
+        OccupationStatus.CURRENT
+    )
+    assert occupation.status(datetime(2026, 1, 1, 23, 1, tzinfo=timezone.utc)) is (
+        OccupationStatus.ENDED
+    )
+
+
 def test_occupation_missing_end_is_unknown() -> None:
     occupation = OceaOccupation.from_api({"dateDebut": "2024-01-01T00:00:00Z"})
     assert occupation.status(datetime(2026, 1, 1, tzinfo=timezone.utc)) is OccupationStatus.UNKNOWN
@@ -296,6 +327,7 @@ def test_invalid_resident_fields_raise(data: dict[str, object]) -> None:
     ("data", "expected"),
     [
         ({"local": {}}, None),
+        ({"local": {}, "fluidesRestitues": None}, None),
         ({"local": {"adresse": {}}}, OceaAddress()),
         (
             {"local": {"adresse": {
@@ -325,3 +357,31 @@ def test_dwelling_address(data: dict[str, object], expected: OceaAddress | None)
 def test_invalid_dwelling_details_raise(data: dict[str, object]) -> None:
     with pytest.raises(OceaApiError):
         OceaDwellingDetails.from_api(data)
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({"fluidesRestitues": []}, ()),
+        (
+            {"local": None, "fluidesRestitues": [
+                {"fluide": "EauFroide"}, {"fluide": "Cetc"}, {"fluide": "Other"}
+            ]},
+            ("EauFroide", "Cetc", "Other"),
+        ),
+    ],
+)
+def test_dwelling_fluids(data: dict[str, object], expected: tuple[str, ...]) -> None:
+    """Map all advertised fluids independently of the address."""
+    assert OceaDwellingFluids.from_api(data).fluids == expected
+
+
+@pytest.mark.parametrize(
+    "data",
+    [{}, {"fluidesRestitues": None}, {"fluidesRestitues": [None]},
+     {"fluidesRestitues": [{}]}, {"fluidesRestitues": [{"fluide": None}]}],
+)
+def test_invalid_dwelling_fluids_raise(data: dict[str, object]) -> None:
+    """Reject malformed discovery data instead of treating it as an empty list."""
+    with pytest.raises(OceaApiError, match="Invalid dwelling fluid"):
+        OceaDwellingFluids.from_api(data)

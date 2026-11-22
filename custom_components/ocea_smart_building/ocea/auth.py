@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -49,14 +50,23 @@ class OceaAuthentication:
         self._user_agent = user_agent
         self._access_token: str | None = None
         self._refresh_token: str | None = None
+        self._refresh_lock = asyncio.Lock()
+        self._authenticate_lock = asyncio.Lock()
 
     @property
     def access_token(self) -> str | None:
         """Return the current access token."""
         return self._access_token
 
-    async def authenticate(self) -> None:
+    async def authenticate(self, *, force: bool = False) -> None:
         """Perform the browser-compatible Azure AD B2C authorization flow."""
+        async with self._authenticate_lock:
+            if self._access_token is not None and not force:
+                return
+            await self._async_authenticate()
+
+    async def _async_authenticate(self) -> None:
+        """Perform one browser-compatible Azure AD B2C authorization flow."""
         verifier, challenge = _generate_pkce()
         state = base64.urlsafe_b64encode(
             json.dumps({
@@ -190,36 +200,39 @@ class OceaAuthentication:
         self._store_tokens(tokens, refresh=False)
         _LOGGER.info("Ocea authentication successful")
 
-    async def refresh_access_token(self) -> None:
+    async def refresh_access_token(self, expected_token: str | None = None) -> None:
         """Refresh the access token or perform full authentication."""
-        if not self._refresh_token:
-            _LOGGER.debug("No refresh token, doing full auth")
-            await self.authenticate()
-            return
-        async with self._session.post(
-            B2C_TOKEN,
-            data={
-                "client_id": B2C_CLIENT_ID,
-                "scope": B2C_SCOPE,
-                "refresh_token": self._refresh_token,
-                "grant_type": "refresh_token",
-                "client_info": "1",
-            },
-            headers=self._token_headers(),
-            timeout=_TIMEOUT,
-        ) as response:
-            if response.status != 200:
-                _LOGGER.warning("Refresh failed (HTTP %s), doing full auth", response.status)
-                self._refresh_token = None
-                retry = True
-                tokens: object = None
-            else:
-                retry = False
-                tokens = await response.json(content_type=None)
-        if retry:
-            await self.authenticate()
-            return
-        self._store_tokens(tokens, refresh=True)
+        async with self._refresh_lock:
+            if expected_token is not None and self._access_token != expected_token:
+                return
+            if not self._refresh_token:
+                _LOGGER.debug("No refresh token, doing full auth")
+                await self.authenticate(force=True)
+                return
+            async with self._session.post(
+                B2C_TOKEN,
+                data={
+                    "client_id": B2C_CLIENT_ID,
+                    "scope": B2C_SCOPE,
+                    "refresh_token": self._refresh_token,
+                    "grant_type": "refresh_token",
+                    "client_info": "1",
+                },
+                headers=self._token_headers(),
+                timeout=_TIMEOUT,
+            ) as response:
+                if response.status != 200:
+                    _LOGGER.warning("Refresh failed (HTTP %s), doing full auth", response.status)
+                    self._refresh_token = None
+                    retry = True
+                    tokens: object = None
+                else:
+                    retry = False
+                    tokens = await response.json(content_type=None)
+            if retry:
+                await self.authenticate(force=True)
+                return
+            self._store_tokens(tokens, refresh=True)
 
     def _store_tokens(self, tokens: object, *, refresh: bool) -> None:
         """Validate and retain tokens without exposing response data."""
