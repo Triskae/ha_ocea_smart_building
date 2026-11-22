@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
@@ -73,6 +73,7 @@ class MeterHistory:
     retry_count: int = 0
     chunk_days: int = _CHUNK_DAYS
     last_old_recheck: date | None = None
+    request_floor: date | None = None
 
 
 def _api_date(value: object) -> date:
@@ -112,6 +113,39 @@ def _occupation_start(
 def _history_start(occupation_start: date, meter: OceaMeter) -> date:
     """Bound a meter's history by both occupation and device installation."""
     return max(occupation_start, _api_date(meter.installation_date))
+
+
+def _dwelling_history_start(
+    occupation_start: date, fluid: str, readings: Iterable[OceaMeterReading]
+) -> date:
+    """Bound dwelling history by the earliest known installation for the fluid."""
+    dates: list[date] = []
+    matched = False
+    invalid = False
+    for reading in readings:
+        if reading.meter.pds.fluid != fluid:
+            continue
+        matched = True
+        try:
+            dates.append(_api_date(reading.meter.installation_date))
+        except OceaApiError:
+            invalid = True
+    if not matched:
+        _LOGGER.warning("No meter found for one Ocea dwelling fluid; using occupation start")
+    elif invalid:
+        if dates:
+            _LOGGER.warning(
+                "Missing or invalid meter installation date for one Ocea dwelling fluid; "
+                "using the earliest valid date"
+            )
+        else:
+            _LOGGER.warning(
+                "No valid meter installation date for one Ocea dwelling fluid; "
+                "using occupation start"
+            )
+    if not dates:
+        return occupation_start
+    return max(occupation_start, min(dates))
 
 
 def _history_id(
@@ -248,6 +282,9 @@ def _load_histories(data: dict[str, object] | None) -> tuple[str, dict[str, Mete
             if raw.get("last_old_recheck") is not None
             else None
         )
+        request_floor = (
+            _api_date(raw["request_floor"]) if raw.get("request_floor") is not None else None
+        )
         if not isinstance(retry_count, int) or isinstance(retry_count, bool):
             raise OceaApiError("Invalid persisted consumption history")
         if not isinstance(chunk_days, int) or isinstance(chunk_days, bool) or not 1 <= chunk_days <= _CHUNK_DAYS:
@@ -263,7 +300,12 @@ def _load_histories(data: dict[str, object] | None) -> tuple[str, dict[str, Mete
                 raise OceaApiError("Invalid persisted consumption history")
         recheck_cursor = _api_date(raw.get("recheck_cursor", raw.get("start")))
         raw_days = raw.get("days")
-        if cursor < start or recheck_cursor < start or not isinstance(raw_days, dict):
+        if (
+            cursor < start
+            or recheck_cursor < start
+            or (request_floor is not None and request_floor < start)
+            or not isinstance(raw_days, dict)
+        ):
             raise OceaApiError("Invalid persisted consumption history")
         days: dict[date, Decimal] = {}
         for day, value in raw_days.items():
@@ -280,6 +322,7 @@ def _load_histories(data: dict[str, object] | None) -> tuple[str, dict[str, Mete
             retry_count,
             chunk_days,
             last_old_recheck,
+            request_floor,
         )
     return generation, histories
 
@@ -309,6 +352,9 @@ def _serialize_histories(
                     history.last_old_recheck.isoformat()
                     if history.last_old_recheck
                     else None
+                ),
+                "request_floor": (
+                    history.request_floor.isoformat() if history.request_floor else None
                 ),
             }
             for key, history in histories.items()
@@ -561,7 +607,11 @@ class OceaHistoryManager:
                 "dwelling",
                 fluid,
                 lambda fluid=fluid: self._async_sync_series(
-                    fluid, occupation_start, today, now, None
+                    fluid,
+                    _dwelling_history_start(occupation_start, fluid, data.meters.values()),
+                    today,
+                    now,
+                    None,
                 ),
             )
             for fluid in sorted(set(dwelling_fluids) & PDS_FLUID_METADATA.keys())
@@ -642,6 +692,13 @@ class OceaHistoryManager:
         recheck_cursor = previous.recheck_cursor or previous.start
         if start < previous.start:
             recheck_cursor = min(recheck_cursor, start)
+        if meter is None:
+            previous_floor = previous.request_floor or previous.start
+            if start < previous_floor:
+                cursor = min(cursor, start)
+                recheck_cursor = min(recheck_cursor, start)
+            cursor = max(cursor, start)
+            recheck_cursor = max(recheck_cursor, start)
         history = MeterHistory(
             history_start,
             cursor,
@@ -651,6 +708,7 @@ class OceaHistoryManager:
             previous.retry_count,
             previous.chunk_days,
             previous.last_old_recheck,
+            start if meter is None else previous.request_floor,
         )
         if history.cursor > today and history.last_old_recheck is None:
             history.last_old_recheck = today
@@ -668,15 +726,15 @@ class OceaHistoryManager:
             request_start = history.cursor
             end = min(request_start + timedelta(days=history.chunk_days - 1), today)
             advance_cursor = True
-        elif history.start < today:
+        elif (request_floor := history.request_floor or history.start) < today:
             old_history_end = today - timedelta(days=_RECENT_OVERLAP_DAYS)
             if (
                 history.last_old_recheck is None
                 or today - history.last_old_recheck >= timedelta(days=_OLD_HISTORY_RECHECK_DAYS)
-            ) and history.start <= old_history_end:
-                request_start = history.recheck_cursor or history.start
+            ) and request_floor <= old_history_end:
+                request_start = history.recheck_cursor or request_floor
                 if request_start > old_history_end:
-                    request_start = history.start
+                    request_start = request_floor
                 end = min(
                     request_start + timedelta(days=history.chunk_days - 1),
                     old_history_end,
@@ -684,7 +742,7 @@ class OceaHistoryManager:
                 older_recheck = True
             else:
                 request_start = max(
-                    history.start,
+                    request_floor,
                     today - timedelta(days=_RECENT_OVERLAP_DAYS - 1),
                 )
                 end = today
@@ -758,7 +816,7 @@ class OceaHistoryManager:
                 elif older_recheck:
                     next_recheck = end + timedelta(days=1)
                     history.recheck_cursor = (
-                        history.start
+                        history.request_floor or history.start
                         if next_recheck
                         > today - timedelta(days=_RECENT_OVERLAP_DAYS)
                         else next_recheck

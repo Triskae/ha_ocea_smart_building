@@ -168,8 +168,16 @@ exact supported fluid code. It does not depend on the config-entry ID, cache
 generation, history start date, device serial number or timezone. The private
 Store holds progress and daily values, not the statistic identity. Dwelling
 water and CETC series use separate stable IDs derived from the dwelling ID and fluid,
-and their history starts at the active occupation. Display names include the
-dwelling ID. If the
+and their history requests start at the later of the active occupation and the
+earliest valid installation date among the discovered meters of that fluid.
+The coordinator retains one selected device per PDS, so other devices returned
+for the same PDS are not considered. Missing or invalid installation dates are
+warned about; with partially valid dates the minimum of those dates is used, which
+may be later than the true earliest installation. If no valid date or matching
+meter is available, requests fall back to the occupation start with a warning.
+Meter discovery remains cached until the integration is reloaded. If a request
+bound changes, stored values are retained while requests respect the current
+bound. Display names include the dwelling ID. If the
 Store is absent or invalid, the manager can rebuild under the same ID;
 Recorder rows are updated at matching timestamps and are never reset by cache
 reconstruction.

@@ -131,6 +131,117 @@ def test_occupation_dates_use_api_calendar_days(
     assert _occupation_start(resident, "local", today) == expected_start
 
 
+@pytest.mark.parametrize(
+    ("occupation", "installations", "expected", "warning"),
+    [
+        ("2024-01-01", ["2024-01-12", "2024-01-05"], "2024-01-05", None),
+        ("2024-01-10", ["2024-01-05", "2024-01-12"], "2024-01-10", None),
+        ("2024-01-05", ["2024-01-05"], "2024-01-05", None),
+        ("2024-01-01", [None, "2024-01-12", "private-installation"], "2024-01-12",
+         "using the earliest valid date"),
+        ("2024-01-01", [None, "private-installation"], "2024-01-01", "using occupation start"),
+        ("2024-01-01", [], "2024-01-01", "No meter found"),
+    ],
+)
+async def test_dwelling_history_start_uses_selected_meters(
+    hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
+    occupation: str,
+    installations: list[str | None],
+    expected: str,
+    warning: str | None,
+) -> None:
+    """Request from the earliest usable installation, bounded by occupation."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local"})
+    entry.add_to_hass(hass)
+    client = AsyncMock(spec=OceaApiClient)
+    client.get_resident.return_value = OceaResident.from_api({
+        "occupations": [{
+            "logementId": "local", "dateDebut": f"{occupation}T00:00:00Z", "dateFin": None
+        }]
+    })
+    client.get_dwelling_fluids.return_value = ["EauFroide"]
+    empty = OceaConsumptionSeries.from_api({"unite": "m3", "consommations": []})
+    client.get_dwelling_consumption.return_value = empty
+    client.get_pds_consumption.return_value = empty
+    meters = [
+        _meter(installation, pds_id=f"pds-{index}")
+        for index, installation in enumerate(installations)
+    ]
+    meters.append(_meter("2023-01-01", fluid="EauChaude", pds_id="other"))
+    coordinator = OceaDataUpdateCoordinator(hass, client, entry)
+    coordinator.async_set_updated_data(OceaData(
+        totals={},
+        meters={
+            meter.identifier: _build_meter_data(meter, {"unite": "m3", "consommations": []})
+            for meter in meters
+        },
+    ))
+    with patch(
+        "custom_components.ocea_smart_building.history.dt_util.now",
+        return_value=datetime(2024, 2, 1, tzinfo=UTC),
+    ):
+        await OceaHistorySynchronizer(hass, entry, client, coordinator)._async_sync()
+    assert client.get_dwelling_consumption.call_args.args[2] == {
+        "debut": f"{expected}T00:00:00.000Z",
+        "fin": "2024-01-31T23:59:59.999Z",
+        "granularity": "Day",
+    }
+    if warning:
+        assert warning in caplog.text
+        assert "private-installation" not in caplog.text
+
+
+@pytest.mark.parametrize("hot_installation", ["2024-01-20", "2024-03-01"])
+async def test_dwelling_fluids_have_independent_installation_bounds(
+    hass: HomeAssistant, hot_installation: str,
+) -> None:
+    """Each fluid has its own bound, and a future fluid cannot block another."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local"})
+    entry.add_to_hass(hass)
+    client = AsyncMock(spec=OceaApiClient)
+    client.get_resident.return_value = OceaResident.from_api({
+        "occupations": [{
+            "logementId": "local", "dateDebut": "2024-01-01T00:00:00Z", "dateFin": None
+        }]
+    })
+    client.get_dwelling_fluids.return_value = ["EauFroide", "EauChaude"]
+    empty = OceaConsumptionSeries.from_api({"unite": "m3", "consommations": []})
+    client.get_dwelling_consumption.return_value = empty
+    client.get_pds_consumption.return_value = empty
+    cold = _meter("2024-01-10", pds_id="cold")
+    hot = _meter(hot_installation, fluid="EauChaude", pds_id="hot")
+    coordinator = OceaDataUpdateCoordinator(hass, client, entry)
+    coordinator.async_set_updated_data(OceaData(
+        totals={},
+        meters={
+            meter.identifier: _build_meter_data(meter, {"unite": "m3", "consommations": []})
+            for meter in (cold, hot)
+        },
+    ))
+    with patch(
+        "custom_components.ocea_smart_building.history.dt_util.now",
+        return_value=datetime(2024, 2, 1, tzinfo=UTC),
+    ):
+        synchronizer = OceaHistorySynchronizer(hass, entry, client, coordinator)
+        await synchronizer._async_sync()
+    payloads = {
+        call.args[1]: call.args[2] for call in client.get_dwelling_consumption.call_args_list
+    }
+    assert payloads["EauFroide"] == {
+        "debut": "2024-01-10T00:00:00.000Z",
+        "fin": "2024-01-31T23:59:59.999Z",
+        "granularity": "Day",
+    }
+    if hot_installation == "2024-01-20":
+        assert payloads["EauChaude"]["debut"] == "2024-01-20T00:00:00.000Z"
+        assert len(payloads) == 2
+    else:
+        assert set(payloads) == {"EauFroide"}
+    assert synchronizer._histories is not None
+    assert synchronizer._histories[_history_id("local", cold)].cursor == date(2024, 2, 1)
+
+
 def test_history_identity_uses_only_dwelling_pds_and_fluid() -> None:
     """Keep the Recorder identity stable across cache and configuration changes."""
     identity = "local\0pds-1\0EauFroide"
@@ -240,6 +351,104 @@ async def test_dwelling_history_backfill_correction_and_restore(
         assert metadata[statistic_id][1]["name"] == f"OCEA - local - {label}"
         assert [row["sum"] for row in rows[statistic_id]] == pytest.approx([0, 1.5, 3.5])
         assert _dwelling_history_id("local", fluid) != _history_id("local", _meter(fluid=fluid))
+
+
+@pytest.mark.usefixtures("real_recorder")
+async def test_dwelling_changed_bound_limits_rechecks_and_preserves_recorded_values(
+    hass: HomeAssistant,
+) -> None:
+    """Constrain requests after the bound changes without deleting old data."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local"})
+    entry.add_to_hass(hass)
+    key = _dwelling_history_id("local", "EauFroide")
+    await history_store(hass, entry).async_save({
+        "generation": "generation",
+        "meters": {key: {
+            "start": "2024-01-01",
+            "cursor": "2024-01-02",
+            "days": {"2024-01-01": "1"},
+            "recheck_cursor": "2024-01-01",
+            "next_request": None,
+        }},
+    })
+    client = AsyncMock(spec=OceaApiClient)
+    client.get_resident.return_value = OceaResident.from_api({
+        "occupations": [{
+            "logementId": "local", "dateDebut": "2024-01-01T00:00:00Z", "dateFin": None
+        }]
+    })
+    client.get_dwelling_fluids.return_value = ["EauFroide"]
+    empty = OceaConsumptionSeries.from_api({"unite": "m3", "consommations": []})
+    client.get_pds_consumption.return_value = empty
+    client.get_dwelling_consumption.side_effect = [
+        OceaConsumptionSeries.from_api({
+            "unite": "m3",
+            "consommations": [
+                {"date": "2024-01-05", "valeur": 2},
+                {"date": "2024-01-09", "valeur": 3},
+            ],
+        }),
+        empty, empty, empty, empty, empty,
+    ]
+    coordinator = OceaDataUpdateCoordinator(hass, client, entry)
+
+    def set_meter(installation: str) -> None:
+        meter = _meter(installation)
+        coordinator.async_set_updated_data(OceaData(
+            totals={},
+            meters={meter.identifier: _build_meter_data(
+                meter, {"unite": "m3", "consommations": []}
+            )},
+        ))
+
+    set_meter("2024-01-05")
+    with patch(
+        "custom_components.ocea_smart_building.history.dt_util.now",
+        side_effect=[
+            datetime(2024, 1, 10, tzinfo=UTC),
+            datetime(2024, 1, 10, tzinfo=UTC),
+            datetime(2024, 1, 17, tzinfo=UTC),
+            datetime(2024, 1, 17, tzinfo=UTC),
+            datetime(2024, 1, 18, tzinfo=UTC),
+            datetime(2024, 1, 18, tzinfo=UTC),
+        ],
+    ):
+        for _ in range(4):
+            await OceaHistorySynchronizer(hass, entry, client, coordinator)._async_sync()
+            await async_recorder_block_till_done(hass)
+        set_meter("2024-01-03")
+        restored = OceaHistorySynchronizer(hass, entry, client, coordinator)
+        await restored._async_sync()
+        await async_recorder_block_till_done(hass)
+        await history_store(hass, entry).async_remove()
+        restored = OceaHistorySynchronizer(hass, entry, client, coordinator)
+        await restored._async_sync()
+        await async_recorder_block_till_done(hass)
+
+    payloads = [call.args[2] for call in client.get_dwelling_consumption.call_args_list]
+    assert [(payload["debut"][:10], payload["fin"][:10]) for payload in payloads] == [
+        ("2024-01-05", "2024-01-09"),
+        ("2024-01-07", "2024-01-09"),
+        ("2024-01-10", "2024-01-16"),
+        ("2024-01-05", "2024-01-13"),
+        ("2024-01-03", "2024-01-17"),
+        ("2024-01-03", "2024-01-17"),
+    ]
+    assert restored._histories is not None
+    history = restored._histories[key]
+    assert history.start == date(2024, 1, 1)
+    assert history.request_floor == date(2024, 1, 3)
+    assert history.days == {
+        date(2024, 1, 1): Decimal(1),
+        date(2024, 1, 5): Decimal(2),
+        date(2024, 1, 9): Decimal(3),
+    }
+    statistic_id = _dwelling_statistic_id("local", "EauFroide")
+    rows = await get_instance(hass).async_add_executor_job(
+        statistics_during_period, hass, datetime(2024, 1, 1, tzinfo=UTC),
+        None, {statistic_id}, "hour", None, {"sum", "state"},
+    )
+    assert [row["sum"] for row in rows[statistic_id]] == pytest.approx([0, 1, 3, 6])
 
 
 async def test_dwelling_cetc_rejects_non_energy_unit(hass: HomeAssistant) -> None:
