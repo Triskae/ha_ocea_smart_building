@@ -112,7 +112,7 @@ async def test_setup_keeps_only_water_leak_entities(
     entry.add_to_hass(hass)
     with (
         patch("custom_components.ocea_smart_building.OceaApiClient", autospec=True) as client,
-        patch("custom_components.ocea_smart_building.OceaHistorySynchronizer", autospec=True),
+        patch("custom_components.ocea_smart_building.OceaHistoryManager", autospec=True),
     ):
         client.return_value.get_pds.return_value = [
             OceaPdsData.from_api({"id": "pds-1", "fluide": "EauFroide"}),
@@ -310,7 +310,7 @@ async def test_session_is_detached_after_entry_unload(hass: HomeAssistant) -> No
     with (
         patch("custom_components.ocea_smart_building.OceaApiClient") as client_class,
         patch("custom_components.ocea_smart_building.OceaDataUpdateCoordinator", autospec=True),
-        patch("custom_components.ocea_smart_building.OceaHistorySynchronizer", autospec=True),
+        patch("custom_components.ocea_smart_building.OceaHistoryManager", autospec=True),
         patch.object(hass.config_entries, "async_forward_entry_setups", new_callable=AsyncMock),
         patch.object(hass.config_entries, "async_unload_platforms", new_callable=AsyncMock, return_value=True),
     ):
@@ -338,7 +338,7 @@ async def test_unload_removes_sensor_update_listener(hass: HomeAssistant) -> Non
     entry.add_to_hass(hass)
     with (
         patch("custom_components.ocea_smart_building.OceaApiClient", autospec=True) as client,
-        patch("custom_components.ocea_smart_building.OceaHistorySynchronizer", autospec=True),
+        patch("custom_components.ocea_smart_building.OceaHistoryManager", autospec=True),
     ):
         client.return_value.get_pds.return_value = [
             OceaPdsData.from_api({"id": "pds-1", "fluide": "EauFroide"})

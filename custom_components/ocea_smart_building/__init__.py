@@ -12,7 +12,7 @@ from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
 from .const import CONF_LOCAL_ID, DOMAIN, UA
 from .coordinator import OceaConfigEntry, OceaDataUpdateCoordinator
-from .history import OceaHistorySynchronizer, history_store
+from .history import OceaHistoryManager, history_store
 from .ocea import OceaApiClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,9 +59,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: OceaConfigEntry) -> bool
         await coordinator.async_config_entry_first_refresh()
         entry.runtime_data = coordinator
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-        history = OceaHistorySynchronizer(hass, entry, client, coordinator)
-        entry.async_on_unload(coordinator.async_add_listener(history.async_schedule))
-        history.async_schedule()
+        history = OceaHistoryManager(hass, entry, client, coordinator)
+        history.async_start()
     except BaseException:
         session.detach()
         raise

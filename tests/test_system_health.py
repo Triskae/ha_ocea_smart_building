@@ -251,7 +251,7 @@ async def test_system_health_tracks_real_entry_lifecycle(hass: HomeAssistant) ->
     entry.add_to_hass(hass)
     with (
         patch("custom_components.ocea_smart_building.OceaApiClient", autospec=True) as client,
-        patch("custom_components.ocea_smart_building.OceaHistorySynchronizer", autospec=True),
+        patch("custom_components.ocea_smart_building.OceaHistoryManager", autospec=True),
         patch(
             "custom_components.ocea_smart_building.system_health.system_health"
             ".async_check_can_reach_url",

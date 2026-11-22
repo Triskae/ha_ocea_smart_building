@@ -81,9 +81,12 @@ class OceaApiClient:
         """Make an authenticated API request, refreshing once on 401."""
         if not self._auth.access_token:
             await self._auth.authenticate()
+        access_token = self._auth.access_token
+        if access_token is None:
+            raise OceaApiError("Authentication completed without an access token")
         for attempt in range(2):
             headers = {
-                "Authorization": f"Bearer {self._auth.access_token}",
+                "Authorization": f"Bearer {access_token}",
                 "Accept": "application/json",
                 "Origin": B2C_REDIRECT_URI,
                 "Referer": f"{B2C_REDIRECT_URI}/",
@@ -109,7 +112,10 @@ class OceaApiClient:
                     return result
             if status == 401 and attempt == 0:
                 _LOGGER.debug("Token expired, refreshing")
-                await self._auth.refresh_access_token()
+                await self._auth.refresh_access_token(access_token)
+                access_token = self._auth.access_token
+                if access_token is None:
+                    raise OceaApiError("Token refresh completed without an access token")
                 continue
             raise OceaApiError(f"API error: HTTP {status}", status=status)
         raise OceaApiError("API authentication retry exhausted")

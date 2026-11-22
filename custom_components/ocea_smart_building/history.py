@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
@@ -28,7 +29,6 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_LOCAL_ID,
-    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     PDS_FLUID_METADATA,
 )
@@ -43,7 +43,14 @@ from .ocea.const import OCEA_TIME_ZONE
 from .ocea.models import OceaConsumptionRequest, OceaConsumptionSeries
 
 _LOGGER = logging.getLogger(__name__)
-_CHUNK_DAYS: Final = 30
+_CHUNK_DAYS: Final = 90
+_MAX_CONCURRENT_REQUESTS: Final = 3
+_MAX_RETRIES: Final = 5
+_RETRY_BASE_SECONDS: Final = 60
+_RETRY_MAX_SECONDS: Final = 21_600
+_RECENT_OVERLAP_DAYS: Final = 3
+_OLD_HISTORY_RECHECK_DAYS: Final = 7
+_DAILY_SYNC_INTERVAL: Final = timedelta(days=1)
 _RESTORE_STATISTICS_LIMIT: Final = 100_000
 
 
@@ -63,6 +70,9 @@ class MeterHistory:
     days: dict[date, Decimal] = field(default_factory=dict)
     next_request: datetime | None = None
     recheck_cursor: date | None = None
+    retry_count: int = 0
+    chunk_days: int = _CHUNK_DAYS
+    last_old_recheck: date | None = None
 
 
 def _api_date(value: object) -> date:
@@ -231,7 +241,18 @@ def _load_histories(data: dict[str, object] | None) -> tuple[str, dict[str, Mete
         cursor = _api_date(raw.get("cursor"))
         raw_next_request = raw.get("next_request")
         next_request: datetime | None = None
-        if raw_next_request is not None:
+        retry_count = raw.get("retry_count", 0)
+        chunk_days = raw.get("chunk_days", _CHUNK_DAYS)
+        last_old_recheck = (
+            _api_date(raw["last_old_recheck"])
+            if raw.get("last_old_recheck") is not None
+            else None
+        )
+        if not isinstance(retry_count, int) or isinstance(retry_count, bool):
+            raise OceaApiError("Invalid persisted consumption history")
+        if not isinstance(chunk_days, int) or isinstance(chunk_days, bool) or not 1 <= chunk_days <= _CHUNK_DAYS:
+            raise OceaApiError("Invalid persisted consumption history")
+        if raw_next_request is not None and "retry_count" in raw:
             if not isinstance(raw_next_request, str):
                 raise OceaApiError("Invalid persisted consumption history")
             try:
@@ -250,7 +271,16 @@ def _load_histories(data: dict[str, object] | None) -> tuple[str, dict[str, Mete
             if parsed_day < start:
                 raise OceaApiError("Invalid persisted consumption history")
             days[parsed_day] = _decimal_value(value)
-        histories[key] = MeterHistory(start, cursor, days, next_request, recheck_cursor)
+        histories[key] = MeterHistory(
+            start,
+            cursor,
+            days,
+            next_request,
+            recheck_cursor,
+            retry_count,
+            chunk_days,
+            last_old_recheck,
+        )
     return generation, histories
 
 
@@ -272,6 +302,13 @@ def _serialize_histories(
                 ),
                 "next_request": (
                     history.next_request.isoformat() if history.next_request else None
+                ),
+                "retry_count": history.retry_count,
+                "chunk_days": history.chunk_days,
+                "last_old_recheck": (
+                    history.last_old_recheck.isoformat()
+                    if history.last_old_recheck
+                    else None
                 ),
             }
             for key, history in histories.items()
@@ -309,7 +346,7 @@ def _daily_statistics(
     return result
 
 
-class OceaHistorySynchronizer:
+class OceaHistoryManager:
     """Backfill and update external statistics for meters and dwelling fluids."""
 
     def __init__(
@@ -329,6 +366,15 @@ class OceaHistorySynchronizer:
         self._histories: dict[str, MeterHistory] | None = None
         self._generation: str | None = None
         self._published: set[str] = set()
+        self._active_series: set[str] = set()
+        self._occupation_start: date | None = None
+        self._dwelling_fluids: tuple[str, ...] | None = None
+        self._discovery_checked_at: datetime | None = None
+        self._global_retry_count = 0
+        self._global_next_request: datetime | None = None
+        self._request_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_REQUESTS)
+        self._store_lock = asyncio.Lock()
+        self._sync_lock = asyncio.Lock()
 
     async def _async_restore_history(
         self, statistic_id: str, start: date, today: date
@@ -380,19 +426,74 @@ class OceaHistorySynchronizer:
         )
 
     @callback
-    def async_schedule(self) -> None:
-        """Schedule one synchronization without overlapping previous cycles."""
+    def async_start(self) -> None:
+        """Start the entry-scoped backfill and daily synchronization worker."""
         if self._task is not None and not self._task.done():
             return
         self._task = self.entry.async_create_background_task(
-            self.hass, self._async_sync(), "Ocea consumption history"
+            self.hass, self._async_run(), "Ocea consumption history"
         )
+
+    async def _async_run(self) -> None:
+        """Run backfill continuously, then synchronize once per day."""
+        while True:
+            await self._async_sync()
+            now = dt_util.utcnow()
+            if self._global_next_request is not None and self._global_next_request > now:
+                delay = (self._global_next_request - now).total_seconds()
+            elif (retry_delay := self._backfill_delay()) is not None:
+                delay = retry_delay
+            elif self._has_pending_backfill():
+                delay = 0
+            else:
+                delay = _DAILY_SYNC_INTERVAL.total_seconds()
+            await asyncio.sleep(delay)
+
+    def _has_pending_backfill(self) -> bool:
+        """Return whether a known series has unprocessed consolidated days."""
+        if self._histories is None:
+            return False
+        last_complete_day = dt_util.now().astimezone(OCEA_TIME_ZONE).date() - timedelta(days=1)
+        return any(
+            self._histories[key].cursor <= last_complete_day
+            for key in self._active_series
+            if key in self._histories
+        )
+
+    def _backfill_delay(self) -> float | None:
+        """Return the earliest persisted retry delay, if any."""
+        if self._histories is None:
+            return None
+        now = dt_util.utcnow()
+        last_complete_day = now.astimezone(OCEA_TIME_ZONE).date() - timedelta(days=1)
+        if any(
+            (history := self._histories.get(key)) is not None
+            and history.cursor <= last_complete_day
+            and (history.next_request is None or history.next_request <= now)
+            for key in self._active_series
+        ):
+            return 0
+        retries = [
+            (history.next_request - now).total_seconds()
+            for key in self._active_series
+            if (history := self._histories.get(key)) is not None
+            if history.next_request is not None
+            and history.next_request > now
+        ]
+        return max(1.0, min(retries)) if retries else None
 
     async def _async_sync(self) -> None:
         """Synchronize each meter and dwelling fluid independently."""
+        async with self._sync_lock:
+            await self._async_sync_locked()
+
+    async def _async_sync_locked(self) -> None:
+        """Perform one pass over all discovered statistics series."""
+        self._active_series = set()
         data = self.coordinator.data
         if data is None:
             return
+        now = dt_util.utcnow()
         try:
             if self._histories is None:
                 try:
@@ -409,53 +510,91 @@ class OceaHistorySynchronizer:
                         _serialize_histories(self._generation, self._histories)
                     )
             local_now = dt_util.now().astimezone(OCEA_TIME_ZONE)
-            today = local_now.date()
             now = dt_util.as_utc(local_now)
-            occupation_start = _occupation_start(
-                await self.client.get_resident(), self.local_id, today
+            if self._global_next_request is not None and now < self._global_next_request:
+                return
+            refresh_discovery = (
+                self._discovery_checked_at is None
+                or now - self._discovery_checked_at >= _DAILY_SYNC_INTERVAL
             )
+            if refresh_discovery:
+                calendar_today = local_now.date()
+                occupation_start = _occupation_start(
+                    await self.client.get_resident(), self.local_id, calendar_today
+                )
+                dwelling_fluids = tuple(
+                    await self.client.get_dwelling_fluids(self.local_id)
+                )
+                self._occupation_start = occupation_start
+                self._dwelling_fluids = dwelling_fluids
+                self._discovery_checked_at = now
+            if self._occupation_start is None or self._dwelling_fluids is None:
+                raise OceaApiError("Ocea history discovery is unavailable")
+            occupation_start = self._occupation_start
+            dwelling_fluids = self._dwelling_fluids
+            today = local_now.date() - timedelta(days=1)
+            self._global_retry_count = 0
+            self._global_next_request = None
         except OceaApiError as err:
+            self._set_global_retry(now)
             _LOGGER.warning("Unable to synchronize Ocea consumption history: %s", err)
             return
         except (OceaAuthError, ClientError, TimeoutError, OSError):
+            self._set_global_retry(now)
             _LOGGER.warning("Unable to synchronize Ocea consumption history")
             return
 
-        for reading in data.meters.values():
-            try:
-                await self._async_sync_meter(reading, occupation_start, today, now)
-            except OceaAuthError:
-                _LOGGER.warning("Unable to authenticate while synchronizing Ocea history")
-                return
-            except OceaApiError as err:
-                _LOGGER.warning("Unable to synchronize one Ocea meter history: %s", err)
-            except (ClientError, TimeoutError, OSError):
-                _LOGGER.warning("Unable to synchronize one Ocea meter history")
-
-        try:
-            dwelling_fluids = await self.client.get_dwelling_fluids(self.local_id)
-        except OceaAuthError:
-            _LOGGER.warning("Unable to authenticate while synchronizing Ocea history")
-            return
-        except OceaApiError as err:
-            _LOGGER.warning("Unable to discover Ocea dwelling fluids: %s", err)
-            return
-        except (ClientError, TimeoutError, OSError):
-            _LOGGER.warning("Unable to discover Ocea dwelling fluids")
-            return
         unsupported_count = len(set(dwelling_fluids) - PDS_FLUID_METADATA.keys())
         if unsupported_count:
             _LOGGER.debug("Ignoring %d unsupported dwelling fluids", unsupported_count)
-        for fluid in sorted(set(dwelling_fluids) & PDS_FLUID_METADATA.keys()):
+        series = [
+            (
+                "meter",
+                reading,
+                lambda reading=reading: self._async_sync_meter(
+                    reading, occupation_start, today, now
+                ),
+            )
+            for reading in data.meters.values()
+        ] + [
+            (
+                "dwelling",
+                fluid,
+                lambda fluid=fluid: self._async_sync_series(
+                    fluid, occupation_start, today, now, None
+                ),
+            )
+            for fluid in sorted(set(dwelling_fluids) & PDS_FLUID_METADATA.keys())
+        ]
+        self._active_series = set()
+
+        async def sync_one(
+            kind: str, series_item: object, sync: Callable[[], Awaitable[None]]
+        ) -> tuple[str, object, Exception | None]:
             try:
-                await self._async_sync_series(fluid, occupation_start, today, now, None)
-            except OceaAuthError:
+                async with self._request_semaphore:
+                    await sync()
+            except (OceaAuthError, OceaApiError, ClientError, TimeoutError, OSError) as err:
+                return kind, series_item, err
+            return kind, series_item, None
+
+        results = await asyncio.gather(
+            *(sync_one(kind, item, sync) for kind, item, sync in series)
+        )
+        authentication_failed = False
+        for kind, _, error in results:
+            if error is None:
+                continue
+            if isinstance(error, OceaAuthError):
+                authentication_failed = True
                 _LOGGER.warning("Unable to authenticate while synchronizing Ocea history")
-                return
-            except OceaApiError as err:
-                _LOGGER.warning("Unable to synchronize one Ocea dwelling history: %s", err)
-            except (ClientError, TimeoutError, OSError):
-                _LOGGER.warning("Unable to synchronize one Ocea dwelling history")
+            elif isinstance(error, OceaApiError):
+                _LOGGER.warning("Unable to synchronize one Ocea %s history: %s", kind, error)
+            else:
+                _LOGGER.warning("Unable to synchronize one Ocea %s history", kind)
+        if authentication_failed:
+            self._set_global_retry(now)
+            return
 
     async def _async_sync_meter(
         self, reading: OceaMeterReading, occupation_start: date, today: date, now: datetime
@@ -482,12 +621,13 @@ class OceaHistorySynchronizer:
         expected_unit = fluid_metadata.api_unit
         meter = reading.meter if reading is not None else None
         start = _history_start(occupation_start, meter) if meter else occupation_start
-        if start > today:
+        if start > today + timedelta(days=1):
             raise OceaApiError("Ocea consumption history begins in the future")
         key = (
             _history_id(self.local_id, meter)
             if meter else _dwelling_history_id(self.local_id, fluid)
         )
+        self._active_series.add(key)
         metadata = (
             _meter_metadata(self.local_id, meter)
             if meter else _dwelling_metadata(self.local_id, fluid)
@@ -508,38 +648,62 @@ class OceaHistorySynchronizer:
             previous.days.copy(),
             previous.next_request,
             recheck_cursor,
+            previous.retry_count,
+            previous.chunk_days,
+            previous.last_old_recheck,
         )
+        if history.cursor > today and history.last_old_recheck is None:
+            history.last_old_recheck = today
         current_items = None
         if reading is not None:
             try:
-                current_items = _current_daily_readings(reading, expected_unit, today)
+                current_items = _current_daily_readings(
+                    reading, expected_unit, today + timedelta(days=1)
+                )
             except OceaApiError:
                 _LOGGER.warning("Unable to use current daily readings for one Ocea meter")
 
-        rechecking = False
+        older_recheck = False
         if history.cursor <= today:
             request_start = history.cursor
-            end = min(request_start + timedelta(days=_CHUNK_DAYS - 1), today)
+            end = min(request_start + timedelta(days=history.chunk_days - 1), today)
             advance_cursor = True
         elif history.start < today:
-            last_completed_day = today - timedelta(days=1)
-            request_start = history.recheck_cursor or history.start
-            if request_start > last_completed_day:
-                request_start = history.start
-            end = min(request_start + timedelta(days=_CHUNK_DAYS - 1), last_completed_day)
+            old_history_end = today - timedelta(days=_RECENT_OVERLAP_DAYS)
+            if (
+                history.last_old_recheck is None
+                or today - history.last_old_recheck >= timedelta(days=_OLD_HISTORY_RECHECK_DAYS)
+            ) and history.start <= old_history_end:
+                request_start = history.recheck_cursor or history.start
+                if request_start > old_history_end:
+                    request_start = history.start
+                end = min(
+                    request_start + timedelta(days=history.chunk_days - 1),
+                    old_history_end,
+                )
+                older_recheck = True
+            else:
+                request_start = max(
+                    history.start,
+                    today - timedelta(days=_RECENT_OVERLAP_DAYS - 1),
+                )
+                end = today
             advance_cursor = False
-            rechecking = True
         else:
             request_start = None
             end = None
             advance_cursor = False
 
-        if current_items is not None:
+        if current_items is not None and history.cursor <= today:
             for item in current_items:
                 if start <= item.day <= today:
                     history.days[item.day] = item.value
 
-        if request_start is not None and end is not None:
+        if (
+            request_start is not None
+            and end is not None
+            and (history.next_request is None or now >= history.next_request)
+        ):
             try:
                 if (
                     advance_cursor
@@ -551,58 +715,71 @@ class OceaHistorySynchronizer:
                         for item in current_items
                         if request_start <= item.day <= end
                     )
-                elif history.next_request is None or now >= history.next_request:
-                    history.next_request = now + timedelta(seconds=DEFAULT_SCAN_INTERVAL)
-                    reserved = MeterHistory(
-                        history.start,
-                        history.cursor,
-                        history.days.copy(),
-                        history.next_request,
-                        history.recheck_cursor,
-                    )
-                    self._histories = {**self._histories, key: reserved}
-                    await self.store.async_save(
-                        _serialize_histories(self._generation, self._histories)
-                    )
-                    payload: OceaConsumptionRequest = {
-                        "debut": f"{request_start.isoformat()}T00:00:00.000Z",
-                        "fin": f"{end.isoformat()}T23:59:59.999Z",
-                        "granularity": "Day",
-                    }
-                    if meter:
-                        response = await self.client.get_pds_consumption(
-                            self.local_id, meter.identifier, payload
-                        )
-                    else:
-                        response = await self.client.get_dwelling_consumption(
-                            self.local_id, fluid, payload
-                        )
-                    items = _parse_daily_response(response, expected_unit)
                 else:
-                    items = None
-                if items is not None:
-                    if any(not request_start <= item.day <= end for item in items):
-                        raise OceaApiError("Daily consumption lies outside the requested period")
-                    for item in items:
-                        history.days[item.day] = item.value
-                    if advance_cursor:
-                        history.cursor = end + timedelta(days=1)
-                    elif rechecking:
-                        recheck_cursor = end + timedelta(days=1)
-                        history.recheck_cursor = (
-                            history.start
-                            if recheck_cursor > today - timedelta(days=1)
-                            else recheck_cursor
-                        )
+                    while True:
+                        payload: OceaConsumptionRequest = {
+                            "debut": f"{request_start.isoformat()}T00:00:00.000Z",
+                            "fin": f"{end.isoformat()}T23:59:59.999Z",
+                            "granularity": "Day",
+                        }
+                        try:
+                            if meter:
+                                response = await self.client.get_pds_consumption(
+                                    self.local_id, meter.identifier, payload
+                                )
+                            else:
+                                response = await self.client.get_dwelling_consumption(
+                                    self.local_id, fluid, payload
+                                )
+                            items = _parse_daily_response(response, expected_unit)
+                        except OceaApiError as err:
+                            if err.status != 413 or request_start >= end:
+                                raise
+                            range_days = (end - request_start).days + 1
+                            history.chunk_days = max(
+                                1,
+                                min(history.chunk_days, range_days // 2),
+                            )
+                            end = min(
+                                request_start
+                                + timedelta(days=history.chunk_days - 1),
+                                end,
+                            )
+                            continue
+                        break
+                if any(not request_start <= item.day <= end for item in items):
+                    raise OceaApiError(
+                        "Daily consumption lies outside the requested period"
+                    )
+                for item in items:
+                    history.days[item.day] = item.value
+                if advance_cursor:
+                    history.cursor = end + timedelta(days=1)
+                elif older_recheck:
+                    next_recheck = end + timedelta(days=1)
+                    history.recheck_cursor = (
+                        history.start
+                        if next_recheck
+                        > today - timedelta(days=_RECENT_OVERLAP_DAYS)
+                        else next_recheck
+                    )
+                    history.last_old_recheck = today
+                history.retry_count = 0
+                history.next_request = None
             except OceaApiError as err:
+                self._set_retry(history, now)
                 _LOGGER.warning("Unable to retrieve one Ocea history period: %s", err)
-            except (ClientError, TimeoutError):
+            except (ClientError, TimeoutError, OSError):
+                self._set_retry(history, now)
                 _LOGGER.warning("Unable to retrieve one Ocea history period")
 
         if key not in self._histories or history != previous:
-            updated = {**self._histories, key: history}
-            await self.store.async_save(_serialize_histories(self._generation, updated))
-            self._histories = updated
+            async with self._store_lock:
+                updated = {**self._histories, key: history}
+                await self.store.async_save(
+                    _serialize_histories(self._generation, updated)
+                )
+                self._histories = updated
         changed_days = [
             day for day, value in history.days.items() if previous.days.get(day) != value
         ]
@@ -614,3 +791,33 @@ class OceaHistorySynchronizer:
             return
         async_add_external_statistics(self.hass, metadata, statistics)
         self._published.add(key)
+
+    @staticmethod
+    def _set_retry(history: MeterHistory, now: datetime) -> None:
+        """Persist a bounded exponential delay for the failed range."""
+        history.retry_count = min(history.retry_count + 1, _MAX_RETRIES)
+        delay = (
+            _DAILY_SYNC_INTERVAL.total_seconds()
+            if history.retry_count >= _MAX_RETRIES
+            else min(
+                _RETRY_BASE_SECONDS * 2 ** (history.retry_count - 1),
+                _RETRY_MAX_SECONDS,
+            )
+        )
+        history.next_request = now + timedelta(seconds=delay)
+
+    def _set_global_retry(self, now: datetime) -> None:
+        """Back off failed resident or fluid discovery calls."""
+        self._global_retry_count = min(self._global_retry_count + 1, _MAX_RETRIES)
+        delay = (
+            _DAILY_SYNC_INTERVAL.total_seconds()
+            if self._global_retry_count >= _MAX_RETRIES
+            else min(
+                _RETRY_BASE_SECONDS * 2 ** (self._global_retry_count - 1),
+                _RETRY_MAX_SECONDS,
+            )
+        )
+        self._global_next_request = now + timedelta(seconds=delay)
+
+
+OceaHistorySynchronizer = OceaHistoryManager

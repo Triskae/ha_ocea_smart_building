@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 from unittest.mock import AsyncMock
@@ -155,6 +156,47 @@ async def test_second_unauthorized_response_does_not_retry(aiohttp_server, monke
             await client._api_request(method, "/api/test", {} if method == "POST" else None)
     assert len(state["requests"]) == 2
     assert len(state["token_forms"]) == 1
+
+
+async def test_concurrent_unauthorized_requests_share_token_refresh(
+    aiohttp_server, monkeypatch
+):
+    """Concurrent 401s refresh once and retry with the shared new token."""
+    state = {"api_statuses": [401, 401, 200, 200]}
+    await _server(aiohttp_server, monkeypatch, state)
+    async with aiohttp.ClientSession() as session:
+        client = _client(session)
+        client._auth._access_token = "old-placeholder"
+        client._auth._refresh_token = "refresh-placeholder"
+        await asyncio.gather(
+            client._api_request("GET", "/api/test"),
+            client._api_request("GET", "/api/test"),
+        )
+
+    assert len(state["token_forms"]) == 1
+    assert [request[2] for request in state["requests"]] == [
+        "Bearer old-placeholder",
+        "Bearer old-placeholder",
+        "Bearer new-placeholder",
+        "Bearer new-placeholder",
+    ]
+
+
+async def test_concurrent_initial_requests_share_authentication(
+    aiohttp_server, monkeypatch
+):
+    """Concurrent first requests do not start duplicate B2C logins."""
+    state = {"api_statuses": [200, 200]}
+    await _server(aiohttp_server, monkeypatch, state)
+    async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as session:
+        client = _client(session)
+        await asyncio.gather(
+            client._api_request("GET", "/api/test"),
+            client._api_request("GET", "/api/test"),
+        )
+
+    assert len(state["token_forms"]) == 1
+    assert len(state["requests"]) == 2
 
 
 @pytest.mark.parametrize(
