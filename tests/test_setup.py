@@ -58,6 +58,69 @@ async def test_migrate_entry_rejects_duplicate_dwelling(hass: HomeAssistant) -> 
     assert entry.unique_id == "resident@example.com"
 
 
+@pytest.mark.usefixtures("enable_custom_integrations", "real_recorder")
+async def test_migration_and_reload_preserve_leaks_without_restoring_consumption(
+    hass: HomeAssistant,
+) -> None:
+    """Migrate an existing registry and keep only the leak entities active."""
+    data = {
+        CONF_EMAIL: "resident@example.com",
+        CONF_PASSWORD: "secret",
+        CONF_LOCAL_ID: "local",
+        "hidden": "value",
+    }
+    entry = MockConfigEntry(domain=DOMAIN, version=1, unique_id="resident@example.com", data=data)
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    old_entities = [
+        registry.async_get_or_create("sensor", DOMAIN, unique_id, config_entry=entry)
+        for unique_id in (
+            f"{DOMAIN}_local_eau_froide",
+            f"{DOMAIN}_local_pds-1_eau_froide",
+        )
+    ]
+    leak = registry.async_get_or_create(
+        "sensor", DOMAIN, f"{DOMAIN}_local_pds-1_fuite", config_entry=entry
+    )
+    leak_binary = registry.async_get_or_create(
+        "binary_sensor", DOMAIN, f"{DOMAIN}_local_pds-1_fuite_detectee", config_entry=entry
+    )
+
+    with (
+        patch("custom_components.ocea_smart_building.OceaApiClient", autospec=True) as client,
+        patch("custom_components.ocea_smart_building.OceaHistoryManager", autospec=True),
+    ):
+        client.return_value.get_pds.return_value = [
+            OceaPdsData.from_api({"id": "pds-1", "fluide": "EauFroide"})
+        ]
+        client.return_value.get_appareils.return_value = []
+        client.return_value.get_consumptions.return_value = [
+            OceaDashboardData.from_api({"fluide": "EauFroide", "valeur": "1"})
+        ]
+        client.return_value.get_pds_consumption.return_value = OceaConsumptionSeries.from_api({
+            "unite": "m3",
+            "consommations": [{
+                "date": "2024-01-01",
+                "valeur": 0.1,
+                "fuiteEstimee": 0.01,
+                "type": "ConsommationEauResponse",
+            }],
+        })
+        for _ in range(2):
+            assert await hass.config_entries.async_setup(entry.entry_id)
+            await hass.async_block_till_done()
+            assert entry.version == 2
+            assert entry.unique_id == "local"
+            assert dict(entry.data) == data
+            assert hass.states.get(leak.entity_id).state == "0.01"
+            assert hass.states.get(leak_binary.entity_id).state == "on"
+            for old in old_entities:
+                state = hass.states.get(old.entity_id)
+                assert state is None or state.state == "unavailable"
+                assert registry.async_get(old.entity_id) is not None
+            assert await hass.config_entries.async_unload(entry.entry_id)
+
+
 async def test_removing_entry_removes_cached_history(hass: HomeAssistant) -> None:
     """Removing an entry removes its cache, not Recorder statistics."""
     entry = MockConfigEntry(domain=DOMAIN)

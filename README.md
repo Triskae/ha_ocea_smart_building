@@ -202,21 +202,29 @@ The previous water consumption entities are no longer provided; check dashboards
 and automations that referenced them. Their existing Recorder history is not
 deleted or migrated into the new statistics.
 
-The integration progressively fetches daily dwelling water and CETC readings
-from the occupation start date, and water and CETC PDS readings from the later of the
-occupation start date and the current meter's installation date, up to 30 days
-per series and five-hour cycle. The dwelling history is requested independently
-of its meters and becomes current as backfill progresses. A unique current
-occupation is required; missing
-or ambiguous start dates prevent backfill. Missing readings are
-not estimated. Once backfill is complete, the integration rechecks imported
-history in rotating periods of up to 30 days, subject to the same five-hour
-request limit. A correction is applied when its period is rechecked; the time
-for a full pass depends on the amount of history. An omitted date is not treated
-as a zero or as a deletion. Earlier readings from a replaced meter are not
-requested from Ocea.
+The integration progressively fetches daily dwelling water and CETC readings,
+starting at the later of the occupation start and the earliest valid installation
+date among the selected meters for that fluid. If some installation dates are
+missing or invalid, only valid dates are considered; if none is valid or no
+meter is found, the occupation start is used. Both cases produce a warning.
+The actual earliest installation may be unknown, and the API's historical
+availability before the selected installation date is not established.
+Only one device per PDS is selected, and meter discovery is cached until the
+integration is reloaded. PDS history starts at the later of the occupation start
+and that PDS's selected meter installation date. A unique current occupation is
+required; missing or ambiguous start dates prevent backfill.
 
-Daily dates use the Ocea calendar (`Europe/Paris`) and are assigned to the last
+The history manager runs separately from the five-hour current-data coordinator.
+It backfills completed days in periods of up to 90 days per series, reducing the
+period if the server responds with HTTP 413. Once caught up, it checks the last
+three completed days daily and revisits older periods weekly. A correction is
+applied when its period is rechecked; the time for a full pass depends on the
+amount of history. Missing readings are not estimated, and an omitted date is not
+treated as zero or as a deletion. Earlier readings from a replaced meter may not
+be requested from Ocea, but already imported readings are retained.
+
+The integration uses `Europe/Paris` as its calendar convention; Ocea's actual
+aggregation timezone is not established. Daily values are assigned to the last
 full hour of that day; they are not hourly measurements. The Home Assistant
 timezone does not affect the statistic ID or the day assigned to a reading. A
 PDS statistic series is identified by the dwelling, PDS and exact Ocea fluid. A
@@ -236,10 +244,12 @@ but does not change the PDS statistic ID.
 Home Assistant does not support a fixed or entity price for an external water
 statistic; this integration does not provide a separate cost statistic.
 
-The resident portal identifies the thermal fluid as `Cetc` and maps it to
-kWh. The confirmed daily PDS response contains dated `consommations` values
-in kWh; dwelling responses use the same expected format. The integration
-requires kWh for both and rejects a different or missing unit.
+The resident portal identifies the thermal fluid as `Cetc`, maps it to kWh and
+adds consumption values for its equivalence calculations. A daily PDS response
+has been observed with dated `consommations` values in kWh; dwelling responses
+use the same expected format. These indications do not establish the server's
+complete semantics for both endpoints. The integration assumes daily
+consumption values and requires kWh for both, rejecting a different or missing unit.
 Unavailable or invalid data is not imported. An unavailable installation date
 also prevents importing that PDS. Daily values must represent consumption
 rather than cumulative meter indexes. Dwelling and PDS heating statistics may

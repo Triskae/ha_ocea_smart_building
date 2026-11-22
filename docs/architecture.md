@@ -161,9 +161,10 @@ read failure does not discard successful readings from other meters or the
 dwelling totals; missing leak estimates remain unavailable rather than being
 reported as “no leak.”
 
-Current-month requests and historical timestamps use the Ocea calendar
-(`Europe/Paris`), independent of Home Assistant's configured timezone. Each
-external statistic ID is derived from the configured dwelling ID, PDS ID and
+Current-month requests and historical timestamps use `Europe/Paris` as the
+integration's calendar convention, independent of Home Assistant's configured
+timezone. The actual timezone of Ocea's daily aggregation is not established.
+Each external statistic ID is derived from the configured dwelling ID, PDS ID and
 exact supported fluid code. It does not depend on the config-entry ID, cache
 generation, history start date, device serial number or timezone. The private
 Store holds progress and daily values, not the statistic identity. Dwelling
@@ -176,9 +177,10 @@ warned about; with partially valid dates the minimum of those dates is used, whi
 may be later than the true earliest installation. If no valid date or matching
 meter is available, requests fall back to the occupation start with a warning.
 Meter discovery remains cached until the integration is reloaded. If a request
-bound changes, stored values are retained while requests respect the current
-bound. Display names include the dwelling ID. If the
-Store is absent or invalid, the manager can rebuild under the same ID;
+bound changes, stored values are retained while dwelling and PDS requests respect
+their current bounds, including after a selected meter is replaced. Display names
+include the dwelling ID. If the Store is absent or invalid, the manager can
+rebuild under the same ID;
 Recorder rows are updated at matching timestamps and are never reset by cache
 reconstruction.
 
@@ -189,7 +191,8 @@ history requests are capped at three per entry. Network, rate-limit, server,
 and other API failures leave the cursor in place and use a persisted exponential
 retry delay; a failed series does not block the others.
 
-The manager requests history only through the last completed Ocea calendar day.
+The manager requests history only through the last completed day in its
+`Europe/Paris` calendar.
 Once a series catches up, it checks a three-day overlap daily and revisits older
 periods weekly to find late corrections. When Ocea returns a changed daily
 value, the manager recalculates and republishes cumulative sums from the first
@@ -200,6 +203,12 @@ Requests currently encode each inclusive integration-side period with a midnight
 UTC start and a `23:59:59.999Z` end. The observed portal uses midnight UTC for
 both bounds, but the server's end-boundary semantics and data consolidation
 cannot be established from the available offline examples.
+
+The portal maps `Cetc` to kWh and sums consumption values for equivalences.
+The integration treats daily values from both dwelling and PDS endpoints as
+consumption, not cumulative indexes, and accumulates each series separately.
+The available evidence does not fully establish the server semantics for both
+endpoints; dwelling and PDS totals may overlap and must not be added together.
 
 ## Integration modules
 

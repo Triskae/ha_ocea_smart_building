@@ -15,7 +15,7 @@ from homeassistant.components.recorder.statistics import (
     get_metadata,
     statistics_during_period,
 )
-from homeassistant.const import UnitOfEnergy, UnitOfVolume
+from homeassistant.const import CONF_EMAIL, CONF_PASSWORD, UnitOfEnergy, UnitOfVolume
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.components.recorder.common import (
@@ -59,6 +59,8 @@ from custom_components.ocea_smart_building.ocea import (
 from custom_components.ocea_smart_building.ocea.models import (
     OceaConsumptionResponse,
     OceaConsumptionSeries,
+    OceaDeviceData,
+    OceaPdsData,
 )
 
 
@@ -129,6 +131,41 @@ def test_occupation_dates_use_api_calendar_days(
         "occupations": [{"logementId": "local", "dateDebut": start, "dateFin": end}]
     })
     assert _occupation_start(resident, "local", today) == expected_start
+
+
+@pytest.mark.parametrize(
+    "occupations",
+    [
+        [{"logementId": "local", "dateFin": None}],
+        [
+            {"logementId": "local", "dateDebut": "2024-01-01T00:00:00Z", "dateFin": None},
+            {"logementId": "local", "dateDebut": "2024-01-02T00:00:00Z", "dateFin": None},
+        ],
+    ],
+)
+async def test_history_does_not_fetch_without_unique_occupation(
+    hass: HomeAssistant, occupations: list[dict[str, object]], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Missing or ambiguous occupation dates prevent historical requests."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local"})
+    entry.add_to_hass(hass)
+    client = AsyncMock(spec=OceaApiClient)
+    client.get_resident.return_value = OceaResident.from_api({"occupations": occupations})
+    meter = _meter()
+    coordinator = OceaDataUpdateCoordinator(hass, client, entry)
+    coordinator.async_set_updated_data(OceaData(
+        totals={},
+        meters={meter.identifier: OceaMeterReading(meter=meter, value=None, latest_date=None)},
+    ))
+    with patch(
+        "custom_components.ocea_smart_building.history.dt_util.now",
+        return_value=datetime(2024, 2, 1, tzinfo=UTC),
+    ):
+        await OceaHistorySynchronizer(hass, entry, client, coordinator)._async_sync()
+    client.get_dwelling_fluids.assert_not_awaited()
+    client.get_dwelling_consumption.assert_not_awaited()
+    client.get_pds_consumption.assert_not_awaited()
+    assert "No unique active Ocea occupation" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -449,6 +486,141 @@ async def test_dwelling_changed_bound_limits_rechecks_and_preserves_recorded_val
         None, {statistic_id}, "hour", None, {"sum", "state"},
     )
     assert [row["sum"] for row in rows[statistic_id]] == pytest.approx([0, 1, 3, 6])
+
+
+@pytest.mark.usefixtures("real_recorder")
+async def test_replaced_meter_bounds_requests_and_keeps_old_statistics(
+    hass: HomeAssistant,
+) -> None:
+    """Keep earlier values while bounding requests to each replacement device."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local"})
+    entry.add_to_hass(hass)
+    old_meter = _meter("2024-01-01")
+    key = _history_id("local", old_meter)
+    await history_store(hass, entry).async_save({
+        "generation": "generation",
+        "meters": {key: {
+            "start": "2024-01-01",
+            "cursor": "2024-01-04",
+            "days": {"2024-01-03": "1"},
+            "recheck_cursor": "2024-01-01",
+            "next_request": None,
+        }},
+    })
+    client = AsyncMock(spec=OceaApiClient)
+    client.get_resident.return_value = OceaResident.from_api({
+        "occupations": [{
+            "logementId": "local", "dateDebut": "2024-01-01T00:00:00Z", "dateFin": None
+        }]
+    })
+    client.get_dwelling_fluids.return_value = []
+
+    def response(local_id, pds_id, payload):
+        values = (
+            [("2024-01-06", 0.5), ("2024-01-10", 2)]
+            if pds_id == "pds-1" else [("2024-01-15", 4)]
+        )
+        readings = [
+            {"date": day, "valeur": value}
+            for day, value in values
+            if payload["debut"][:10] <= day <= payload["fin"][:10]
+        ]
+        return OceaConsumptionSeries.from_api({"unite": "m3", "consommations": readings})
+
+    client.get_pds_consumption.side_effect = response
+    coordinator = OceaDataUpdateCoordinator(hass, client, entry)
+    replacement = _meter("2024-01-10")
+    new_pds = _meter("2024-01-15", pds_id="pds-2")
+
+    def set_meters(*meters: OceaMeter) -> None:
+        coordinator.async_set_updated_data(OceaData(
+            totals={},
+            meters={
+                meter.identifier: OceaMeterReading(meter=meter, value=None, latest_date=None)
+                for meter in meters
+            },
+        ))
+
+    set_meters(replacement)
+    with patch(
+        "custom_components.ocea_smart_building.history.dt_util.now",
+        side_effect=[
+            datetime(2024, 1, day, tzinfo=UTC) for day in (20, 22, 24)
+        ],
+    ):
+        await OceaHistorySynchronizer(hass, entry, client, coordinator)._async_sync()
+        await async_recorder_block_till_done(hass)
+        set_meters(replacement, new_pds)
+        await OceaHistorySynchronizer(hass, entry, client, coordinator)._async_sync()
+        await async_recorder_block_till_done(hass)
+        set_meters(_meter("2024-01-05"), new_pds)
+        await OceaHistorySynchronizer(hass, entry, client, coordinator)._async_sync()
+        await async_recorder_block_till_done(hass)
+
+    calls = client.get_pds_consumption.call_args_list
+    assert calls[0].args[2]["debut"].startswith("2024-01-10")
+    assert next(call for call in calls if call.args[1] == "pds-2").args[2]["debut"].startswith(
+        "2024-01-15"
+    )
+    assert any(
+        call.args[1] == "pds-1" and call.args[2]["debut"].startswith("2024-01-05")
+        for call in calls
+    )
+    old_id = _meter_statistic_id("local", old_meter)
+    new_id = _meter_statistic_id("local", new_pds)
+    assert old_id == _meter_statistic_id("local", replacement)
+    assert old_id != new_id
+    rows = await get_instance(hass).async_add_executor_job(
+        statistics_during_period, hass, datetime(2024, 1, 1, tzinfo=UTC),
+        None, {old_id, new_id}, "hour", None, {"sum", "state"},
+    )
+    assert [row["sum"] for row in rows[old_id]] == [0, 1, 1.5, 3.5]
+    assert [row["sum"] for row in rows[new_id]] == [0, 4]
+
+
+@pytest.mark.parametrize("kind", ["dwelling", "meter"])
+async def test_history_rejects_response_before_requested_floor(
+    hass: HomeAssistant, kind: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Reject an out-of-range response without advancing or publishing it."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local"})
+    entry.add_to_hass(hass)
+    client = AsyncMock(spec=OceaApiClient)
+    client.get_resident.return_value = OceaResident.from_api({
+        "occupations": [{
+            "logementId": "local", "dateDebut": "2024-01-01T00:00:00Z", "dateFin": None
+        }]
+    })
+    client.get_dwelling_fluids.return_value = ["EauFroide"] if kind == "dwelling" else []
+    response = OceaConsumptionSeries.from_api({
+        "unite": "m3", "consommations": [{"date": "2024-01-04", "valeur": 1}]
+    })
+    client.get_dwelling_consumption.return_value = response
+    client.get_pds_consumption.return_value = response
+    meter = _meter("2024-01-05")
+    coordinator = OceaDataUpdateCoordinator(hass, client, entry)
+    coordinator.async_set_updated_data(OceaData(
+        totals={},
+        meters={meter.identifier: OceaMeterReading(meter=meter, value=None, latest_date=None)},
+    ))
+    synchronizer = OceaHistorySynchronizer(hass, entry, client, coordinator)
+    with (
+        patch(
+            "custom_components.ocea_smart_building.history.dt_util.now",
+            return_value=datetime(2024, 2, 1, tzinfo=UTC),
+        ),
+        patch("custom_components.ocea_smart_building.history.async_add_external_statistics") as add,
+    ):
+        await synchronizer._async_sync()
+    key = _history_id("local", meter) if kind == "meter" else _dwelling_history_id(
+        "local", "EauFroide"
+    )
+    assert synchronizer._histories is not None
+    assert synchronizer._histories[key].cursor == date(2024, 1, 5)
+    assert synchronizer._histories[key].retry_count == 1
+    assert not synchronizer._histories[key].days
+    assert "outside the requested period" in caplog.text
+    add.assert_not_called()
 
 
 async def test_dwelling_cetc_rejects_non_energy_unit(hass: HomeAssistant) -> None:
@@ -1205,6 +1377,8 @@ async def test_history_response_wins_over_stale_current_month_reading(
         {"unite": "m3", "consommations": [{"date": "2024-03-10", "valeur": 1}]},
         {"consommations": [{"date": "2024-03-10", "valeur": 1}]},
         {"unite": "kWh"},
+        {"unite": "kWh", "consommations": [{"date": "2024-03-10", "valeur": None}]},
+        {"unite": "kWh", "consommations": [{"date": "2024-03-10"}]},
         {"unite": "kWh", "consommations": [{"date": "2024-02-29", "valeur": 1}]},
         {"unite": "kWh", "consommations": [{"date": "2024-03-10", "valeur": -1}]},
         {"unite": "kWh", "consommations": [
@@ -1397,6 +1571,112 @@ async def test_missing_cache_reuses_existing_statistics_series(
     assert [row["sum"] for row in rows[statistic_id]] == pytest.approx(
         [0, 0.1, 0.3, 0.6]
     )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "real_recorder")
+async def test_reinstall_restores_separate_dwelling_and_meter_statistics(
+    hass: HomeAssistant,
+) -> None:
+    """Reinstalling one dwelling retains its statistics and leaves another intact."""
+    client = AsyncMock(spec=OceaApiClient)
+    client.get_resident.return_value = OceaResident.from_api({
+        "occupations": [
+            {"logementId": local_id, "dateDebut": "2024-01-01T00:00:00Z", "dateFin": None}
+            for local_id in ("local-a", "local-b")
+        ]
+    })
+    client.get_pds.side_effect = lambda local_id: [
+        OceaPdsData.from_api({"id": pds_id, "fluide": CETC_FLUID})
+        for pds_id in (("shared", "second") if local_id == "local-a" else ("shared",))
+    ]
+    client.get_appareils.side_effect = lambda payload: [
+        OceaDeviceData.from_api({"pdsId": pds_id, "datePose": "2024-01-01"})
+        for pds_id in payload["pdsIds"]
+    ]
+    client.get_consumptions.return_value = []
+    client.get_dwelling_fluids.return_value = [CETC_FLUID]
+
+    def pds_response(local_id, pds_id, payload):
+        value = 2 if pds_id == "shared" else 3
+        readings = [{"date": "2024-03-10", "valeur": value}]
+        if payload["debut"].startswith("2024-01"):
+            readings.insert(0, {"date": "2024-01-02", "valeur": 1})
+        return OceaConsumptionSeries.from_api({"unite": "kWh", "consommations": readings})
+
+    client.get_pds_consumption.side_effect = pds_response
+    client.get_dwelling_consumption.return_value = OceaConsumptionSeries.from_api({
+        "unite": "kWh",
+        "consommations": [
+            {"date": "2024-01-02", "valeur": 4},
+            {"date": "2024-03-10", "valeur": 5},
+        ],
+    })
+
+    def new_entry(local_id: str) -> MockConfigEntry:
+        return MockConfigEntry(
+            domain=DOMAIN,
+            version=2,
+            unique_id=local_id,
+            data={CONF_EMAIL: "resident@example.com", CONF_PASSWORD: "secret", CONF_LOCAL_ID: local_id},
+        )
+
+    first = new_entry("local-a")
+    other = new_entry("local-b")
+    first.add_to_hass(hass)
+    with (
+        patch("custom_components.ocea_smart_building.OceaApiClient", return_value=client),
+        patch("custom_components.ocea_smart_building.OceaHistoryManager", autospec=True),
+        patch(
+            "custom_components.ocea_smart_building.history.dt_util.now",
+            return_value=datetime(2024, 3, 12, tzinfo=UTC),
+        ),
+    ):
+        for entry in (first, other):
+            if entry is other:
+                other.add_to_hass(hass)
+            assert await hass.config_entries.async_setup(entry.entry_id)
+            await OceaHistorySynchronizer(hass, entry, client, entry.runtime_data)._async_sync()
+        await async_recorder_block_till_done(hass)
+
+        assert await history_store(hass, first).async_load() is not None
+        assert (await hass.config_entries.async_remove(first.entry_id))["require_restart"] is False
+        assert await history_store(hass, first).async_load() is None
+
+        replacement = new_entry("local-a")
+        replacement.add_to_hass(hass)
+        assert replacement.entry_id != first.entry_id
+        assert await hass.config_entries.async_setup(replacement.entry_id)
+        await OceaHistorySynchronizer(
+            hass, replacement, client, replacement.runtime_data
+        )._async_sync()
+        await async_recorder_block_till_done(hass)
+
+        ids = {
+            _dwelling_statistic_id(local_id, CETC_FLUID)
+            for local_id in ("local-a", "local-b")
+        } | {
+            _meter_statistic_id(local_id, _meter(fluid=CETC_FLUID, pds_id=pds_id))
+            for local_id, pds_id in (
+                ("local-a", "shared"), ("local-a", "second"), ("local-b", "shared")
+            )
+        }
+        metadata = await get_instance(hass).async_add_executor_job(
+            partial(get_metadata, hass, statistic_ids=ids)
+        )
+        rows = await get_instance(hass).async_add_executor_job(
+            statistics_during_period, hass, datetime(2024, 1, 1, tzinfo=UTC),
+            None, ids, "hour", None, {"sum", "state"},
+        )
+        assert set(metadata) == set(rows) == ids
+        assert all(item[1]["unit_of_measurement"] == UnitOfEnergy.KILO_WATT_HOUR for item in metadata.values())
+        for local_id in ("local-a", "local-b"):
+            assert [row["sum"] for row in rows[_dwelling_statistic_id(local_id, CETC_FLUID)]] == [0, 4, 9]
+            shared_id = _meter_statistic_id(local_id, _meter(fluid=CETC_FLUID, pds_id="shared"))
+            assert [row["sum"] for row in rows[shared_id]] == [0, 1, 3]
+        second_id = _meter_statistic_id("local-a", _meter(fluid=CETC_FLUID, pds_id="second"))
+        assert [row["sum"] for row in rows[second_id]] == [0, 1, 4]
+        assert await hass.config_entries.async_unload(replacement.entry_id)
+        assert await hass.config_entries.async_unload(other.entry_id)
 
 
 async def test_invalid_cache_rebuilds_without_changing_statistic_id(

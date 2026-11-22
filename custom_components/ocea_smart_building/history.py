@@ -692,13 +692,12 @@ class OceaHistoryManager:
         recheck_cursor = previous.recheck_cursor or previous.start
         if start < previous.start:
             recheck_cursor = min(recheck_cursor, start)
-        if meter is None:
-            previous_floor = previous.request_floor or previous.start
-            if start < previous_floor:
-                cursor = min(cursor, start)
-                recheck_cursor = min(recheck_cursor, start)
-            cursor = max(cursor, start)
-            recheck_cursor = max(recheck_cursor, start)
+        previous_floor = previous.request_floor or previous.start
+        if start < previous_floor:
+            cursor = min(cursor, start)
+            recheck_cursor = min(recheck_cursor, start)
+        cursor = max(cursor, start)
+        recheck_cursor = max(recheck_cursor, start)
         history = MeterHistory(
             history_start,
             cursor,
@@ -708,7 +707,7 @@ class OceaHistoryManager:
             previous.retry_count,
             previous.chunk_days,
             previous.last_old_recheck,
-            start if meter is None else previous.request_floor,
+            start,
         )
         if history.cursor > today and history.last_old_recheck is None:
             history.last_old_recheck = today
