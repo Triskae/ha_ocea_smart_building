@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from functools import partial
 from hashlib import sha256
@@ -106,6 +106,29 @@ def test_occupation_and_meter_dates_are_distinct() -> None:
     assert _history_start(date(2024, 1, 4), _meter()) == date(2024, 1, 4)
     with pytest.raises(OceaApiError):
         _history_start(start, _meter(None))
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "today", "expected_start"),
+    [
+        ("2024-01-01T00:00:00+01:00", None, date(2024, 1, 1), date(2024, 1, 1)),
+        (
+            "2024-03-31T00:00:00+01:00",
+            "2024-10-27T00:00:00+02:00",
+            date(2024, 10, 27),
+            date(2024, 3, 31),
+        ),
+        ("2024-12-31T23:30:00-03:00", None, date(2024, 12, 31), date(2024, 12, 31)),
+    ],
+)
+def test_occupation_dates_use_api_calendar_days(
+    start: str, end: str | None, today: date, expected_start: date
+) -> None:
+    """Keep the supplied calendar days despite crossing midnight in UTC."""
+    resident = OceaResident.from_api({
+        "occupations": [{"logementId": "local", "dateDebut": start, "dateFin": end}]
+    })
+    assert _occupation_start(resident, "local", today) == expected_start
 
 
 def test_history_identity_uses_only_dwelling_pds_and_fluid() -> None:
@@ -534,6 +557,155 @@ def test_daily_statistics_use_last_hour_across_winter_time_change() -> None:
     assert records[1]["start"] == datetime(2024, 10, 26, 21, tzinfo=UTC)
     assert records[2]["start"] == datetime(2024, 10, 27, 22, tzinfo=UTC)
     assert (records[2]["start"] - records[1]["start"]).total_seconds() == 25 * 3600
+
+
+@pytest.mark.usefixtures("real_recorder")
+@pytest.mark.parametrize(
+    ("first_day", "expected_hours"),
+    [
+        (
+            date(2024, 3, 30),
+            [datetime(2024, 3, 30, 22, tzinfo=UTC),
+             datetime(2024, 3, 31, 21, tzinfo=UTC),
+             datetime(2024, 4, 1, 21, tzinfo=UTC)],
+        ),
+        (
+            date(2024, 10, 26),
+            [datetime(2024, 10, 26, 21, tzinfo=UTC),
+             datetime(2024, 10, 27, 22, tzinfo=UTC),
+             datetime(2024, 10, 28, 22, tzinfo=UTC)],
+        ),
+        (
+            date(2024, 12, 31),
+            [datetime(2024, 12, 31, 22, tzinfo=UTC),
+             datetime(2025, 1, 1, 22, tzinfo=UTC),
+             datetime(2025, 1, 2, 22, tzinfo=UTC)],
+        ),
+    ],
+)
+async def test_calendar_boundaries_recorder_correction_and_cache_restore(
+    hass: HomeAssistant, first_day: date, expected_hours: list[datetime]
+) -> None:
+    """Keep Paris daily statistics and corrected sums through cache loss."""
+    await hass.config.async_set_time_zone("America/Los_Angeles")
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local"})
+    entry.add_to_hass(hass)
+    client = AsyncMock(spec=OceaApiClient)
+    client.get_resident.return_value = OceaResident.from_api({
+        "occupations": [{
+            "logementId": "local",
+            "dateDebut": f"{first_day.isoformat()}T00:00:00+01:00",
+            "dateFin": None,
+        }]
+    })
+    client.get_dwelling_fluids.return_value = ["EauFroide"]
+    days = [first_day + timedelta(days=index) for index in range(3)]
+
+    def response(values: list[float]) -> OceaConsumptionSeries:
+        return OceaConsumptionSeries.from_api({
+            "unite": "m3",
+            "consommations": [
+                {"date": f"{day.isoformat()}T00:00:00", "valeur": value}
+                for day, value in zip(days, values, strict=True)
+            ],
+        })
+
+    client.get_dwelling_consumption.side_effect = [
+        response([1, 2, 3]),
+        response([1.5, 2, 3]),
+        OceaConsumptionSeries.from_api({"unite": "m3", "consommations": []}),
+    ]
+    coordinator = OceaDataUpdateCoordinator(hass, client, entry)
+    coordinator.async_set_updated_data(OceaData(totals={}, meters={}))
+    current_day = first_day + timedelta(days=3)
+    now = datetime.combine(current_day, datetime.min.time(), tzinfo=UTC)
+    synchronizer = OceaHistorySynchronizer(hass, entry, client, coordinator)
+    with patch(
+        "custom_components.ocea_smart_building.history.dt_util.now",
+        side_effect=[now, now + timedelta(hours=5), now + timedelta(hours=10)],
+    ):
+        await synchronizer._async_sync()
+        await async_recorder_block_till_done(hass)
+        await synchronizer._async_sync()
+        await async_recorder_block_till_done(hass)
+        await history_store(hass, entry).async_remove()
+        restored = OceaHistorySynchronizer(hass, entry, client, coordinator)
+        await restored._async_sync()
+        await async_recorder_block_till_done(hass)
+
+    payloads = [call.args[2] for call in client.get_dwelling_consumption.call_args_list]
+    assert payloads == [{
+        "debut": f"{first_day.isoformat()}T00:00:00.000Z",
+        "fin": f"{days[-1].isoformat()}T23:59:59.999Z",
+        "granularity": "Day",
+    }] * 3
+    statistic_id = _dwelling_statistic_id("local", "EauFroide")
+    assert restored._histories is not None
+    history = restored._histories[_dwelling_history_id("local", "EauFroide")]
+    assert history.days == dict(zip(days, map(Decimal, ("1.5", "2", "3")), strict=True))
+    rows = await get_instance(hass).async_add_executor_job(
+        statistics_during_period, hass, expected_hours[0] - timedelta(hours=2),
+        None, {statistic_id}, "hour", None, {"sum", "state"},
+    )
+    assert set(rows) == {statistic_id}
+    records = rows[statistic_id]
+    assert [row["start"] for row in records] == [
+        (expected_hours[0] - timedelta(hours=1)).timestamp(),
+        *(hour.timestamp() for hour in expected_hours),
+    ]
+    assert [row["state"] for row in records] == pytest.approx([0, 1.5, 2, 3])
+    assert [row["sum"] for row in records] == pytest.approx([0, 1.5, 3.5, 6.5])
+
+
+@pytest.mark.usefixtures("real_recorder")
+async def test_existing_history_is_preserved_when_occupation_start_moves_forward(
+    hass: HomeAssistant,
+) -> None:
+    """Keep earlier cached and Recorder values from the former UTC-based start."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local"})
+    entry.add_to_hass(hass)
+    client = AsyncMock(spec=OceaApiClient)
+
+    def resident(start: str) -> OceaResident:
+        return OceaResident.from_api({
+            "occupations": [{"logementId": "local", "dateDebut": start, "dateFin": None}]
+        })
+
+    client.get_resident.return_value = resident("2023-12-31T23:00:00Z")
+    client.get_dwelling_fluids.return_value = ["EauFroide"]
+    client.get_dwelling_consumption.side_effect = [
+        OceaConsumptionSeries.from_api({
+            "unite": "m3",
+            "consommations": [
+                {"date": "2023-12-31", "valeur": 1},
+                {"date": "2024-01-01", "valeur": 2},
+            ],
+        }),
+        OceaConsumptionSeries.from_api({"unite": "m3", "consommations": []}),
+    ]
+    coordinator = OceaDataUpdateCoordinator(hass, client, entry)
+    coordinator.async_set_updated_data(OceaData(totals={}, meters={}))
+    with patch(
+        "custom_components.ocea_smart_building.history.dt_util.now",
+        side_effect=[datetime(2024, 1, 2, hour, tzinfo=UTC) for hour in (0, 5)],
+    ):
+        await OceaHistorySynchronizer(hass, entry, client, coordinator)._async_sync()
+        await async_recorder_block_till_done(hass)
+        client.get_resident.return_value = resident("2024-01-01T00:00:00+01:00")
+        restored = OceaHistorySynchronizer(hass, entry, client, coordinator)
+        await restored._async_sync()
+        await async_recorder_block_till_done(hass)
+
+    assert restored._histories is not None
+    history = restored._histories[_dwelling_history_id("local", "EauFroide")]
+    assert history.start == date(2023, 12, 31)
+    assert history.days == {date(2023, 12, 31): Decimal(1), date(2024, 1, 1): Decimal(2)}
+    statistic_id = _dwelling_statistic_id("local", "EauFroide")
+    rows = await get_instance(hass).async_add_executor_job(
+        statistics_during_period, hass, datetime(2023, 12, 31, tzinfo=UTC),
+        None, {statistic_id}, "hour", None, {"sum", "state"},
+    )
+    assert [row["sum"] for row in rows[statistic_id]] == pytest.approx([0, 1, 3])
 
 
 @pytest.mark.parametrize("value", [Decimal(-1), Decimal("NaN"), Decimal("Infinity")])

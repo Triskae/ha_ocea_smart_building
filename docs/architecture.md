@@ -111,6 +111,11 @@ local times are invalid rather than guessed. When the latest calendar-only
 reading cannot be ordered against a timestamp on the same Paris day, its
 latest-reading metadata is unavailable.
 
+Occupation timestamps retain their supplied offset: dwelling selection compares
+instants, while history uses the calendar dates written by the API for occupation
+start and end. Meter installation dates retain their existing calendar-date
+interpretation.
+
 The coordinator ignores individual consumption readings with invalid or
 missing dates or values, warns without logging their contents, and aggregates
 the remaining values. A partial total can understate actual consumption; a
@@ -183,6 +188,10 @@ value, the manager recalculates and republishes cumulative sums from the first
 changed day onward. A missing date is not synthesized as zero or interpreted as
 a deletion. The API's maximum supported period remains an empirical limit; 90
 days is the initial request target, not a guarantee about Ocea's server.
+Requests currently encode each inclusive integration-side period with a midnight
+UTC start and a `23:59:59.999Z` end. The observed portal uses midnight UTC for
+both bounds, but the server's end-boundary semantics and data consolidation
+cannot be established from the available offline examples.
 
 ## Integration modules
 

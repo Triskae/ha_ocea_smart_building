@@ -95,6 +95,27 @@ def test_current_month_payload_uses_requested_calendar_date() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("now", "start", "end"),
+    [
+        (datetime(2023, 12, 31, 23, tzinfo=timezone.utc), "2024-01-01", "2024-01-01"),
+        (datetime(2024, 2, 29, 22, tzinfo=timezone.utc), "2024-02-01", "2024-02-29"),
+        (datetime(2024, 2, 29, 23, tzinfo=timezone.utc), "2024-03-01", "2024-03-01"),
+        (datetime(2024, 3, 30, 23, tzinfo=timezone.utc), "2024-03-01", "2024-03-31"),
+        (datetime(2024, 10, 26, 22, tzinfo=timezone.utc), "2024-10-01", "2024-10-27"),
+    ],
+)
+def test_current_month_payload_at_paris_calendar_boundaries(
+    now: datetime, start: str, end: str
+) -> None:
+    """The request follows Paris dates regardless of the UTC calendar day."""
+    assert _current_month_payload(now) == {
+        "debut": f"{start}T00:00:00.000Z",
+        "fin": f"{end}T23:59:59.999Z",
+        "granularity": "Day",
+    }
+
+
 @pytest.mark.parametrize("error", [TimeoutError("secret-url"), RuntimeError("secret-url")])
 def test_coordinator_error_does_not_expose_exception_details(error: Exception) -> None:
     """Network and unexpected exception details may contain credentials."""
@@ -359,6 +380,20 @@ def test_latest_instant_respects_explicit_offsets() -> None:
     ]})
     reading = _build_meter_data(meter, response)
     assert reading.latest_date == datetime(2026, 9, 10, 10, 30, tzinfo=timezone.utc)
+    assert reading.estimated_leak == Decimal("0.2")
+
+
+def test_latest_instant_orders_both_folds_of_autumn_clock_change() -> None:
+    """The second 02:15 occurs after the first 02:45 in Paris."""
+    meter = OceaMeter.from_api({"id": "pds", "fluide": "EauFroide"}, None)
+    response = OceaConsumptionSeries.from_api({"consommations": [
+        {"date": "2024-10-27T02:15:00+01:00", "valeur": 1, "fuiteEstimee": "0,2"},
+        {"date": "2024-10-27T02:45:00+02:00", "valeur": 2, "fuiteEstimee": "0,1"},
+    ]})
+    reading = _build_meter_data(meter, response)
+    assert reading.latest_date == datetime(
+        2024, 10, 27, 1, 15, tzinfo=timezone.utc
+    )
     assert reading.estimated_leak == Decimal("0.2")
 
 

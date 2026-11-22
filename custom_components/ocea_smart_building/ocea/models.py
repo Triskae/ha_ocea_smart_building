@@ -410,13 +410,14 @@ class OccupationStatus(StrEnum):
 
 
 def _instant(value: object) -> datetime | None:
+    """Parse an aware instant while preserving its original calendar date."""
     if not isinstance(value, str):
         return None
     try:
         result = datetime.fromisoformat(value)
     except ValueError:
         return None
-    return result.astimezone(timezone.utc) if result.utcoffset() is not None else None
+    return result if result.utcoffset() is not None else None
 
 
 @dataclass(frozen=True, slots=True)
