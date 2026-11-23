@@ -16,7 +16,7 @@ from aiohttp import ClientSession, ClientTimeout
 
 from .auth import OCEAAuthentication
 from .const import API_BASE, B2C_REDIRECT_URI
-from .exceptions import OCEAApiError
+from .exceptions import OCEAApiError, OCEAAuthError
 from .models import (
     OCEAConsumptionRequest,
     OCEAConsumptionSeries,
@@ -117,6 +117,8 @@ class OCEAApiClient:
                 if access_token is None:
                     raise OCEAApiError("Token refresh completed without an access token")
                 continue
+            if status == 401:
+                raise OCEAAuthError("API authentication failed: HTTP 401")
             raise OCEAApiError(f"API error: HTTP {status}", status=status)
         raise OCEAApiError("API authentication retry exhausted")
 

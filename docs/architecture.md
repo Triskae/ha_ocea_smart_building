@@ -157,9 +157,10 @@ Dwelling fluid discovery does not depend on PDS discovery and uses the same
 supported-fluid metadata. The front-end identifies the thermal fluid as `Cetc` and
 maps it to kWh; the client classifies generic, water, RFC and unclassified
 consumption responses while retaining OCEA's wire fields. A meter-specific
-read failure does not discard successful readings from other meters or the
-dwelling totals; missing leak estimates remain unavailable rather than being
-reported as “no leak.”
+read failure makes that meter's leak entities unavailable without discarding
+successful readings from other meters or the dwelling totals. A successful
+response without a leak estimate produces an unknown state rather than
+reporting “no leak.”
 
 Current-month requests and historical timestamps use `Europe/Paris` as the
 integration's calendar convention, independent of Home Assistant's configured
@@ -223,7 +224,7 @@ endpoints; dwelling and PDS totals may overlap and must not be added together.
 | `history.py` | Run an entry-scoped backfill and daily history service for dwelling and PDS water and CETC readings, persist per-series progress, and enqueue external Recorder statistics. |
 | `entity.py` | Shared coordinator entity base, device metadata, and stable unique-ID construction for dwelling and meter entities. |
 | `sensor.py` | Estimated-leak sensors for water meters when OCEA provides estimates. |
-| `binary_sensor.py` | Per-meter leak state, derived from the latest estimated-leak value. Missing estimates are represented as unavailable, not as “no leak.” |
+| `binary_sensor.py` | Per-meter leak state, derived from the latest estimated-leak value. Missing estimates are unknown, not “no leak.” |
 | `const.py` | Integration domain, version/User-Agent, config keys, polling interval, and fluid-to-sensor mapping. |
 | `strings.json`, `translations/` | Config-flow, entity, and device translations. Keep the source and English/French translations aligned when translated keys change. |
 | `ocea/` | Asynchronous OCEA API client, browser-compatible B2C authentication, API models, protocol constants, and client exceptions. This package uses but does not own the injected HTTP session. |

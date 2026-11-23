@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import replace
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
+from homeassistant.config_entries import SOURCE_REAUTH
+from homeassistant.const import (
+    CONF_EMAIL,
+    CONF_PASSWORD,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -22,6 +29,7 @@ from custom_components.ocea_smart_building import (
 )
 from custom_components.ocea_smart_building.const import CONF_LOCAL_ID, DOMAIN
 from custom_components.ocea_smart_building.history import history_store
+from custom_components.ocea_smart_building.ocea import OCEAApiError, OCEAAuthError
 from custom_components.ocea_smart_building.ocea.models import (
     OCEAConsumptionSeries,
     OCEADashboardData,
@@ -159,6 +167,156 @@ async def test_unload_cancels_history_task(hass: HomeAssistant) -> None:
         await asyncio.wait_for(started.wait(), timeout=3)
         assert await hass.config_entries.async_unload(entry.entry_id)
         assert cancelled.is_set()
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "real_recorder")
+async def test_meter_availability_and_logging_transitions(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Keep other meters available and distinguish a failed fetch from missing data."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        unique_id="local",
+        data={CONF_EMAIL: "resident@example.com", CONF_PASSWORD: "secret", CONF_LOCAL_ID: "local"},
+    )
+    entry.add_to_hass(hass)
+    good = OCEAConsumptionSeries.from_api({
+        "consommations": [{
+            "date": "2026-09-15",
+            "valeur": 1,
+            "fuiteEstimee": 0.1,
+            "type": "ConsommationEauResponse",
+        }],
+    })
+    missing = OCEAConsumptionSeries.from_api({"consommations": []})
+    responses: dict[str, OCEAConsumptionSeries | Exception] = {
+        "pds-1": good,
+        "pds-2": good,
+    }
+
+    async def meter_reading(
+        _local_id: str, pds_id: str, _payload: object
+    ) -> OCEAConsumptionSeries:
+        response = responses[pds_id]
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    with (
+        patch("custom_components.ocea_smart_building.OCEAApiClient", autospec=True) as client,
+        patch("custom_components.ocea_smart_building.OCEAHistoryManager", autospec=True),
+        caplog.at_level(logging.INFO, logger="custom_components.ocea_smart_building.coordinator"),
+    ):
+        api = client.return_value
+        api.get_pds.return_value = [
+            OCEAPdsData.from_api({"id": pds_id, "fluide": "EauFroide"})
+            for pds_id in responses
+        ]
+        api.get_appareils.return_value = []
+        api.get_consumptions.return_value = []
+        api.get_pds_consumption.side_effect = meter_reading
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+        ids = {entity.unique_id: entity.entity_id for entity in entities}
+        sensor = ids[f"{DOMAIN}_local_pds-1_fuite"]
+        binary = ids[f"{DOMAIN}_local_pds-1_fuite_detectee"]
+        other = ids[f"{DOMAIN}_local_pds-2_fuite_detectee"]
+        coordinator = entry.runtime_data
+
+        assert hass.states.get(sensor).state == "0.1"
+        assert hass.states.get(binary).state == "on"
+
+        responses["pds-1"] = TimeoutError("sensitive-placeholder")
+        for _ in range(2):
+            await coordinator.async_refresh()
+            await hass.async_block_till_done()
+            assert hass.states.get(sensor).state == STATE_UNAVAILABLE
+            assert hass.states.get(binary).state == STATE_UNAVAILABLE
+            assert hass.states.get(other).state == "on"
+
+        responses["pds-1"] = missing
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+        assert hass.states.get(sensor).state == STATE_UNKNOWN
+        assert hass.states.get(binary).state == STATE_UNKNOWN
+
+        responses["pds-1"] = good
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+        assert hass.states.get(sensor).state == "0.1"
+        assert hass.states.get(binary).state == "on"
+
+        api.get_consumptions.side_effect = OCEAApiError("temporarily unavailable")
+        for _ in range(2):
+            await coordinator.async_refresh()
+            await hass.async_block_till_done()
+            assert hass.states.get(sensor).state == STATE_UNAVAILABLE
+            assert hass.states.get(binary).state == STATE_UNAVAILABLE
+            assert hass.states.get(other).state == STATE_UNAVAILABLE
+        api.get_consumptions.side_effect = None
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+        assert hass.states.get(binary).state == "on"
+
+        messages = [
+            record.getMessage()
+            for record in caplog.records
+            if record.name == "custom_components.ocea_smart_building.coordinator"
+        ]
+        assert messages.count("1 OCEA meter(s) became unavailable") == 1
+        assert messages.count("1 OCEA meter(s) became available again") == 1
+        assert messages.count(
+            "Error fetching ocea_smart_building data: Error fetching data: temporarily unavailable"
+        ) == 1
+        assert messages.count("Fetching ocea_smart_building data recovered") == 1
+        assert all(
+            "sensitive-placeholder" not in message and "pds-1" not in message
+            for message in messages
+        )
+        assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+@pytest.mark.parametrize("method", ["get_pds", "get_consumptions", "get_pds_consumption"])
+@pytest.mark.usefixtures("enable_custom_integrations", "real_recorder")
+async def test_auth_failure_during_setup_or_update_starts_reauth(
+    hass: HomeAssistant, method: str
+) -> None:
+    """Authentication failures during discovery and updates start reauthentication."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        unique_id="local",
+        data={CONF_EMAIL: "resident@example.com", CONF_PASSWORD: "secret", CONF_LOCAL_ID: "local"},
+    )
+    entry.add_to_hass(hass)
+    with (
+        patch("custom_components.ocea_smart_building.OCEAApiClient", autospec=True) as client,
+        patch("custom_components.ocea_smart_building.OCEAHistoryManager", autospec=True),
+    ):
+        api = client.return_value
+        api.get_pds.return_value = [OCEAPdsData.from_api({"id": "pds", "fluide": "EauFroide"})]
+        api.get_appareils.return_value = []
+        api.get_consumptions.return_value = []
+        api.get_pds_consumption.return_value = OCEAConsumptionSeries.from_api({"consommations": []})
+        if method == "get_pds":
+            api.get_pds.side_effect = OCEAAuthError("API authentication failed: HTTP 401")
+            assert not await hass.config_entries.async_setup(entry.entry_id)
+        else:
+            assert await hass.config_entries.async_setup(entry.entry_id)
+            await hass.async_block_till_done()
+            getattr(api, method).side_effect = OCEAAuthError("API authentication failed: HTTP 401")
+            await entry.runtime_data.async_refresh()
+        await hass.async_block_till_done()
+        flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+        assert any(
+            flow["context"]["source"] == SOURCE_REAUTH
+            and flow["context"]["entry_id"] == entry.entry_id
+            for flow in flows
+        )
+        if method != "get_pds":
+            assert await hass.config_entries.async_unload(entry.entry_id)
 
 
 @pytest.mark.usefixtures("enable_custom_integrations", "real_recorder")

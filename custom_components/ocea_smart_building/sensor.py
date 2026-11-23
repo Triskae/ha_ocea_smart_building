@@ -15,7 +15,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import CONF_LOCAL_ID, PDS_FLUID_METADATA
 from .coordinator import OCEAConfigEntry, OCEADataUpdateCoordinator
 from .entity import (
-    OCEAEntity,
+    OCEAMeterEntity,
     meter_device_info,
     meter_entity_unique_id,
 )
@@ -106,7 +106,7 @@ async def async_setup_entry(
     )
 
 
-class OCEAMeterSensor(OCEAEntity, SensorEntity):
+class OCEAMeterSensor(OCEAMeterEntity, SensorEntity):
     """Representation of an estimated leak for one water meter."""
 
     entity_description: SensorEntityDescription
@@ -119,9 +119,8 @@ class OCEAMeterSensor(OCEAEntity, SensorEntity):
         meter: OCEAMeter,
     ) -> None:
         """Initialize an individual meter sensor."""
-        super().__init__(coordinator)
+        super().__init__(coordinator, meter)
         self.entity_description = description
-        self._meter = meter
         self._attr_unique_id = meter_entity_unique_id(
             local_id, meter, description.key
         )
@@ -130,9 +129,7 @@ class OCEAMeterSensor(OCEAEntity, SensorEntity):
     @property
     def native_value(self) -> float | None:
         """Return this meter's estimated leak."""
-        if self.coordinator.data is None:
-            return None
-        reading = self.coordinator.data.meters.get(self._meter.identifier)
+        reading = self._reading
         if reading is None:
             return None
         value = reading.estimated_leak
