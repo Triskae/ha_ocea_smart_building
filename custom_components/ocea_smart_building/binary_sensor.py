@@ -1,4 +1,4 @@
-"""Binary sensor platform for Ocea Smart Building leak detection."""
+"""Binary sensor platform for OCEA Smart Building leak detection."""
 
 from __future__ import annotations
 
@@ -10,16 +10,16 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import CONF_LOCAL_ID, PDS_FLUID_METADATA
-from .coordinator import OceaConfigEntry, OceaDataUpdateCoordinator, OceaMeterReading
-from .entity import OceaEntity, meter_device_info, meter_entity_unique_id
-from .ocea import OceaMeter
+from .coordinator import OCEAConfigEntry, OCEADataUpdateCoordinator, OCEAMeterReading
+from .entity import OCEAEntity, meter_device_info, meter_entity_unique_id
+from .ocea import OCEAMeter
 
 PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: OceaConfigEntry,
+    config_entry: OCEAConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up leak binary sensors for discovered water meters."""
@@ -28,23 +28,23 @@ async def async_setup_entry(
     readings = coordinator.data.meters.values() if coordinator.data else ()
 
     async_add_entities(
-        OceaLeakBinarySensor(coordinator, local_id, reading.meter)
+        OCEALeakBinarySensor(coordinator, local_id, reading.meter)
         for reading in readings
         if PDS_FLUID_METADATA[reading.meter.pds.fluid].supports_water_leak_sensors
     )
 
 
-class OceaLeakBinarySensor(OceaEntity, BinarySensorEntity):
-    """Represent whether Ocea estimates a leak for one water meter."""
+class OCEALeakBinarySensor(OCEAEntity, BinarySensorEntity):
+    """Represent whether OCEA estimates a leak for one water meter."""
 
     _attr_translation_key = "fuite"
     _attr_device_class = BinarySensorDeviceClass.MOISTURE
 
     def __init__(
         self,
-        coordinator: OceaDataUpdateCoordinator,
+        coordinator: OCEADataUpdateCoordinator,
         local_id: str,
-        meter: OceaMeter,
+        meter: OCEAMeter,
     ) -> None:
         """Initialize a leak binary sensor."""
         super().__init__(coordinator)
@@ -55,7 +55,7 @@ class OceaLeakBinarySensor(OceaEntity, BinarySensorEntity):
         self._attr_device_info = meter_device_info(local_id, meter)
 
     @property
-    def _reading(self) -> OceaMeterReading | None:
+    def _reading(self) -> OCEAMeterReading | None:
         """Return the current reading for this meter."""
         if self.coordinator.data is None:
             return None

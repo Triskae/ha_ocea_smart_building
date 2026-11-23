@@ -1,4 +1,4 @@
-"""DataUpdateCoordinator for Ocea Smart Building."""
+"""DataUpdateCoordinator for OCEA Smart Building."""
 
 from __future__ import annotations
 
@@ -20,22 +20,22 @@ from .const import (
     DOMAIN,
     PDS_FLUID_METADATA,
 )
-from .ocea import OceaApiClient, OceaApiError, OceaAuthError, OceaMeter
+from .ocea import OCEAApiClient, OCEAApiError, OCEAAuthError, OCEAMeter
 from .ocea.const import OCEA_TIME_ZONE
 from .ocea.models import (
-    OceaConsumptionDataItem,
-    OceaConsumptionRequest,
-    OceaConsumptionSeries,
-    OceaDashboardData,
-    OceaDevicesRequest,
-    OceaUnclassifiedConsumptionData,
-    OceaWaterConsumptionData,
+    OCEAConsumptionDataItem,
+    OCEAConsumptionRequest,
+    OCEAConsumptionSeries,
+    OCEADashboardData,
+    OCEADevicesRequest,
+    OCEAUnclassifiedConsumptionData,
+    OCEAWaterConsumptionData,
 )
 
 
 @dataclass(frozen=True, slots=True)
-class OceaDailyConsumption:
-    """One dated Ocea consumption value."""
+class OCEADailyConsumption:
+    """One dated OCEA consumption value."""
 
     day: date
     value: Decimal
@@ -43,37 +43,37 @@ class OceaDailyConsumption:
 
 
 @dataclass(frozen=True, slots=True)
-class OceaMeterReading:
-    """Current-month consumption for one Ocea meter."""
+class OCEAMeterReading:
+    """Current-month consumption for one OCEA meter."""
 
-    meter: OceaMeter
+    meter: OCEAMeter
     value: Decimal | None
     latest_date: date | datetime | None
     unit: str | None = None
     estimated_leak: Decimal | None = None
     consent: bool | None = None
     response_type: str | None = None
-    daily_consumptions: tuple[OceaDailyConsumption, ...] | None = None
+    daily_consumptions: tuple[OCEADailyConsumption, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class OceaData:
+class OCEAData:
     """Coordinator payload: dwelling totals and per-meter readings."""
 
     totals: dict[str, Decimal]
-    meters: dict[str, OceaMeterReading]
+    meters: dict[str, OCEAMeterReading]
 
 
 _LOGGER = logging.getLogger(__name__)
 
 
 def daily_consumptions_from_series(
-    response: OceaConsumptionSeries,
-) -> tuple[OceaDailyConsumption, ...] | None:
-    """Convert complete typed readings to Ocea calendar days."""
+    response: OCEAConsumptionSeries,
+) -> tuple[OCEADailyConsumption, ...] | None:
+    """Convert complete typed readings to OCEA calendar days."""
     if "consommations" not in response.raw:
         return None
-    readings: list[OceaDailyConsumption] = []
+    readings: list[OCEADailyConsumption] = []
     for item in response.items:
         if item.date is None or item.value is None:
             return None
@@ -82,11 +82,11 @@ def daily_consumptions_from_series(
             if isinstance(item.date, datetime)
             else item.date
         )
-        readings.append(OceaDailyConsumption(day, item.value, item.consent))
+        readings.append(OCEADailyConsumption(day, item.value, item.consent))
     return tuple(readings)
 
 
-def _current_month_payload(now: datetime) -> OceaConsumptionRequest:
+def _current_month_payload(now: datetime) -> OCEAConsumptionRequest:
     """Build the daily consumption request for the current local month."""
     today = now.astimezone(OCEA_TIME_ZONE).date()
     return {
@@ -96,11 +96,11 @@ def _current_month_payload(now: datetime) -> OceaConsumptionRequest:
     }
 
 
-def _build_meter_data(meter: OceaMeter, response: OceaConsumptionSeries) -> OceaMeterReading:
+def _build_meter_data(meter: OCEAMeter, response: OCEAConsumptionSeries) -> OCEAMeterReading:
     """Aggregate one PDS response while preserving its metadata."""
     total = Decimal(0)
-    valid_items: list[tuple[date, OceaConsumptionDataItem]] = []
-    dated_items: list[tuple[date, OceaConsumptionDataItem]] = []
+    valid_items: list[tuple[date, OCEAConsumptionDataItem]] = []
+    dated_items: list[tuple[date, OCEAConsumptionDataItem]] = []
     unknown_date = False
     for item in response.items:
         if item.date is None:
@@ -119,10 +119,10 @@ def _build_meter_data(meter: OceaMeter, response: OceaConsumptionSeries) -> Ocea
     if len(valid_items) != len(response.items):
         _LOGGER.warning("Some meter readings were invalid; the consumption total may be incomplete")
     if response.items and not valid_items:
-        return OceaMeterReading(meter=meter, value=None, latest_date=None, unit=response.unit)
+        return OCEAMeterReading(meter=meter, value=None, latest_date=None, unit=response.unit)
 
     latest_date: date | datetime | None = None
-    latest_item: OceaConsumptionDataItem | None = None
+    latest_item: OCEAConsumptionDataItem | None = None
     if unknown_date:
         _LOGGER.warning("Some meter reading dates are invalid; latest metadata is unavailable")
     elif dated_items:
@@ -146,10 +146,10 @@ def _build_meter_data(meter: OceaMeter, response: OceaConsumptionSeries) -> Ocea
             latest_item = None
     estimated_leak = (
         latest_item.estimated_leak
-        if isinstance(latest_item, (OceaWaterConsumptionData, OceaUnclassifiedConsumptionData))
+        if isinstance(latest_item, (OCEAWaterConsumptionData, OCEAUnclassifiedConsumptionData))
         else None
     )
-    return OceaMeterReading(
+    return OCEAMeterReading(
         meter=meter,
         value=total,
         latest_date=latest_date,
@@ -163,23 +163,23 @@ def _build_meter_data(meter: OceaMeter, response: OceaConsumptionSeries) -> Ocea
 
 def _as_update_error(err: Exception) -> Exception:
     """Translate a client error into the matching coordinator exception."""
-    if isinstance(err, OceaAuthError):
+    if isinstance(err, OCEAAuthError):
         return ConfigEntryAuthFailed(f"Authentication failed: {err}")
-    if isinstance(err, OceaApiError):
+    if isinstance(err, OCEAApiError):
         return UpdateFailed(f"Error fetching data: {err}")
     if isinstance(err, (ClientError, TimeoutError)):
-        return UpdateFailed("Error connecting to Ocea")
+        return UpdateFailed("Error connecting to OCEA")
     return UpdateFailed("Unexpected error fetching data")
 
 
-class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
-    """Manage fetching Ocea consumption data."""
+class OCEADataUpdateCoordinator(DataUpdateCoordinator[OCEAData]):
+    """Manage fetching OCEA consumption data."""
 
     def __init__(
         self,
         hass: HomeAssistant,
-        client: OceaApiClient,
-        config_entry: OceaConfigEntry,
+        client: OCEAApiClient,
+        config_entry: OCEAConfigEntry,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -191,7 +191,7 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
         )
         self.client = client
         self._local_id: str = config_entry.data[CONF_LOCAL_ID]
-        self._meters: dict[str, OceaMeter] = {}
+        self._meters: dict[str, OCEAMeter] = {}
 
     async def _async_setup(self) -> None:
         """Discover supported dwelling meters once, before the first refresh."""
@@ -200,9 +200,9 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
         except Exception as err:
             raise _as_update_error(err) from err
 
-    async def _async_update_data(self) -> OceaData:
-        """Fetch data from the Ocea API."""
-        _LOGGER.debug("Ocea coordinator: starting data fetch")
+    async def _async_update_data(self) -> OCEAData:
+        """Fetch data from the OCEA API."""
+        _LOGGER.debug("OCEA coordinator: starting data fetch")
         try:
             raw_data = await self.client.get_consumptions(self._local_id)
             payload = _current_month_payload(dt_util.now())
@@ -210,22 +210,22 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
         except Exception as err:
             raise _as_update_error(err) from err
 
-        data = OceaData(totals=self._aggregate_totals(raw_data), meters=meters)
+        data = OCEAData(totals=self._aggregate_totals(raw_data), meters=meters)
         _LOGGER.debug(
-            "Ocea consumption data updated: %d aggregate values, %d individual meters",
+            "OCEA consumption data updated: %d aggregate values, %d individual meters",
             len(data.totals),
             len(data.meters),
         )
         return data
 
-    async def _discover_meters(self) -> dict[str, OceaMeter]:
+    async def _discover_meters(self) -> dict[str, OCEAMeter]:
         """Discover the configured dwelling's supported meters."""
         pds_data = [
             item
             for item in await self.client.get_pds(self._local_id)
             if item.id and item.fluid is not None and item.fluid in PDS_FLUID_METADATA
         ]
-        payload: OceaDevicesRequest = {"pdsIds": [str(item.id) for item in pds_data]}
+        payload: OCEADevicesRequest = {"pdsIds": [str(item.id) for item in pds_data]}
         appareils = await self.client.get_appareils(payload)
         appareils_by_pds = {
             str(item.pds_id): item for item in appareils if item.pds_id
@@ -235,24 +235,24 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
             for item in pds_data
         }
 
-    async def _fetch_readings(self, payload: OceaConsumptionRequest) -> dict[str, OceaMeterReading]:
+    async def _fetch_readings(self, payload: OCEAConsumptionRequest) -> dict[str, OCEAMeterReading]:
         """Fetch current-month consumption for each meter."""
         readings = {
-            pds_id: OceaMeterReading(meter=meter, value=None, latest_date=None)
+            pds_id: OCEAMeterReading(meter=meter, value=None, latest_date=None)
             for pds_id, meter in self._meters.items()
         }
         for pds_id, meter in self._meters.items():
             try:
                 response = await self.client.get_pds_consumption(self._local_id, pds_id, payload)
                 readings[pds_id] = _build_meter_data(meter, response)
-            except OceaAuthError:
+            except OCEAAuthError:
                 raise
-            except (OceaApiError, ClientError, TimeoutError):
-                _LOGGER.warning("Unable to update one Ocea meter")
+            except (OCEAApiError, ClientError, TimeoutError):
+                _LOGGER.warning("Unable to update one OCEA meter")
         return readings
 
     @staticmethod
-    def _aggregate_totals(raw_data: list[OceaDashboardData]) -> dict[str, Decimal]:
+    def _aggregate_totals(raw_data: list[OCEADashboardData]) -> dict[str, Decimal]:
         """Map the dwelling's dashboard consumption entries to sensor keys."""
         totals: dict[str, Decimal] = {}
         for item in raw_data:
@@ -267,4 +267,4 @@ class OceaDataUpdateCoordinator(DataUpdateCoordinator[OceaData]):
         return totals
 
 
-OceaConfigEntry = ConfigEntry[OceaDataUpdateCoordinator]
+OCEAConfigEntry = ConfigEntry[OCEADataUpdateCoordinator]

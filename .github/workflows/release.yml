@@ -47,7 +47,7 @@ jobs:
           constants = importlib.util.module_from_spec(spec)
           spec.loader.exec_module(constants)
 
-          expected_user_agent = f"Home-Assistant-Ocea-Smart-Building/{version}"
+          expected_user_agent = f"Home-Assistant-OCEA-Smart-Building/{version}"
           if manifest["version"] != version:
               raise SystemExit(
                   f'Tag version {version} does not match manifest version '
@@ -96,7 +96,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Ocea Smart Building $GITHUB_REF_NAME" \
+            --title "OCEA Smart Building $GITHUB_REF_NAME" \
             --notes-file "$NOTES_FILE" \
             --verify-tag \
             --latest

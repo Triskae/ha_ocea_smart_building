@@ -1,4 +1,4 @@
-"""Tests for individual Ocea water-meter API calls."""
+"""Tests for individual OCEA water-meter API calls."""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ import pytest
 from aiohttp import web
 
 from custom_components.ocea_smart_building.const import UA
-from custom_components.ocea_smart_building.ocea import OceaApiClient, OceaApiError
+from custom_components.ocea_smart_building.ocea import OCEAApiClient, OCEAApiError
 from custom_components.ocea_smart_building.ocea.models import (
-    OceaGenericConsumptionData,
-    OceaRfcConsumptionData,
-    OceaUnclassifiedConsumptionData,
-    OceaWaterConsumptionData,
+    OCEAGenericConsumptionData,
+    OCEARfcConsumptionData,
+    OCEAUnclassifiedConsumptionData,
+    OCEAWaterConsumptionData,
 )
 
 pytestmark = pytest.mark.usefixtures("local_http_only")
@@ -96,7 +96,7 @@ async def test_meter_endpoints(aiohttp_server, monkeypatch, method, path, payloa
         "custom_components.ocea_smart_building.ocea.client.API_BASE", str(server.make_url("/")).rstrip("/")
     )
     async with aiohttp.ClientSession() as session:
-        client = OceaApiClient("resident@example.com", "placeholder", user_agent=UA, session=session)
+        client = OCEAApiClient("resident@example.com", "placeholder", user_agent=UA, session=session)
         client._auth._access_token = "placeholder"
         if method == "pds":
             actual = await client.get_pds("local-123")
@@ -113,31 +113,31 @@ async def test_meter_endpoints(aiohttp_server, monkeypatch, method, path, payloa
     [
         (
             {"consommations": [{"type": "OtherResponse", "date": "2026-09-01", "valeur": 1}]},
-            OceaUnclassifiedConsumptionData,
+            OCEAUnclassifiedConsumptionData,
             "2026-09-01",
             Decimal(1),
         ),
         (
             {"consommations": [{"type": "ConsommationResponse", "date": 20260901, "valeur": 1}]},
-            OceaGenericConsumptionData,
+            OCEAGenericConsumptionData,
             None,
             Decimal(1),
         ),
         (
             {"consommations": [{"type": "ConsommationResponse", "date": "2026-09-01"}]},
-            OceaGenericConsumptionData,
+            OCEAGenericConsumptionData,
             "2026-09-01",
             None,
         ),
         (
             {"consommations": [{"type": "ConsommationResponse", "date": "2026-09-01", "valeur": True}]},
-            OceaGenericConsumptionData,
+            OCEAGenericConsumptionData,
             "2026-09-01",
             None,
         ),
         (
             {"consommations": [{"type": "ConsommationResponse", "date": "2026-09-01", "valeur": None}]},
-            OceaGenericConsumptionData,
+            OCEAGenericConsumptionData,
             "2026-09-01",
             None,
         ),
@@ -158,7 +158,7 @@ async def test_consumption_endpoint_tolerates_unknown_and_invalid_readings(
         str(server.make_url("/")).rstrip("/"),
     )
     async with aiohttp.ClientSession() as session:
-        client = OceaApiClient("resident@example.com", "placeholder", user_agent=UA, session=session)
+        client = OCEAApiClient("resident@example.com", "placeholder", user_agent=UA, session=session)
         client._auth._access_token = "placeholder"
         actual = await client.get_pds_consumption(
             "local-123",
@@ -206,7 +206,7 @@ async def test_metadata_endpoints_retain_unvalidated_fields(
         str(server.make_url("/")).rstrip("/"),
     )
     async with aiohttp.ClientSession() as session:
-        client = OceaApiClient("resident@example.com", "placeholder", user_agent=UA, session=session)
+        client = OCEAApiClient("resident@example.com", "placeholder", user_agent=UA, session=session)
         client._auth._access_token = "placeholder"
         if method == "pds":
             actual = await client.get_pds("local-123")
@@ -228,9 +228,9 @@ async def test_api_error_does_not_expose_response_body(aiohttp_server, monkeypat
         "custom_components.ocea_smart_building.ocea.client.API_BASE", str(server.make_url("/")).rstrip("/")
     )
     async with aiohttp.ClientSession() as session:
-        client = OceaApiClient("resident@example.com", "placeholder", user_agent=UA, session=session)
+        client = OCEAApiClient("resident@example.com", "placeholder", user_agent=UA, session=session)
         client._auth._access_token = "placeholder"
-        with pytest.raises(OceaApiError, match="HTTP 500") as error:
+        with pytest.raises(OCEAApiError, match="HTTP 500") as error:
             await client._api_request(method, "/test", {} if method == "POST" else None)
     assert "private resident data" not in str(error.value)
 
@@ -247,9 +247,9 @@ async def test_invalid_json_does_not_expose_response_body(aiohttp_server, monkey
         "custom_components.ocea_smart_building.ocea.client.API_BASE", str(server.make_url("/")).rstrip("/")
     )
     async with aiohttp.ClientSession() as session:
-        client = OceaApiClient("resident@example.com", "placeholder", user_agent=UA, session=session)
+        client = OCEAApiClient("resident@example.com", "placeholder", user_agent=UA, session=session)
         client._auth._access_token = "placeholder"
-        with pytest.raises(OceaApiError, match="Invalid API JSON response") as error:
+        with pytest.raises(OCEAApiError, match="Invalid API JSON response") as error:
             await client._api_request("GET", "/test")
     assert "private resident data" not in str(error.value)
 
@@ -270,7 +270,7 @@ async def test_one_client_targets_explicit_encoded_identifiers(aiohttp_server, m
         str(server.make_url("/")).rstrip("/"),
     )
     async with aiohttp.ClientSession() as session:
-        client = OceaApiClient("synthetic", "placeholder", user_agent=UA, session=session)
+        client = OCEAApiClient("synthetic", "placeholder", user_agent=UA, session=session)
         client._auth._access_token = "placeholder"
         await client.get_consumptions("local/one")
         await client.get_pds("local two")
@@ -313,9 +313,9 @@ async def test_invalid_known_fields_are_rejected(aiohttp_server, monkeypatch, me
         str(server.make_url("/")).rstrip("/"),
     )
     async with aiohttp.ClientSession() as session:
-        client = OceaApiClient("synthetic", "placeholder", user_agent=UA, session=session)
+        client = OCEAApiClient("synthetic", "placeholder", user_agent=UA, session=session)
         client._auth._access_token = "placeholder"
-        with pytest.raises(OceaApiError):
+        with pytest.raises(OCEAApiError):
             if method == "dashboard":
                 await client.get_consumptions("local")
             elif method == "pds":
@@ -350,7 +350,7 @@ async def test_debug_shape_never_logs_unknown_keys_or_values(
     )
     logger = "custom_components.ocea_smart_building.ocea.client"
     async with aiohttp.ClientSession() as session:
-        client = OceaApiClient("secret-email", "secret-password", user_agent=UA, session=session)
+        client = OCEAApiClient("secret-email", "secret-password", user_agent=UA, session=session)
         client._auth._access_token = "secret-token"
         with caplog.at_level(logging.DEBUG, logger=logger):
             await client.get_resident()
@@ -376,7 +376,7 @@ async def test_shape_diagnostics_are_skipped_when_debug_is_disabled(aiohttp_serv
         str(server.make_url("/")).rstrip("/"),
     )
     async with aiohttp.ClientSession() as session:
-        client = OceaApiClient("synthetic", "placeholder", user_agent=UA, session=session)
+        client = OCEAApiClient("synthetic", "placeholder", user_agent=UA, session=session)
         client._auth._access_token = "placeholder"
         with patch.object(client, "_log_response") as log_response:
             await client.get_pds("local")
@@ -386,8 +386,8 @@ async def test_shape_diagnostics_are_skipped_when_debug_is_disabled(aiohttp_serv
 async def test_debug_shape_is_bounded_and_unknown_hashes_are_instance_scoped(caplog):
     """Diagnostics truncate wide and deep data and do not correlate accounts."""
     async with aiohttp.ClientSession() as session:
-        first = OceaApiClient("synthetic", "placeholder", user_agent=UA, session=session)
-        second = OceaApiClient("synthetic", "placeholder", user_agent=UA, session=session)
+        first = OCEAApiClient("synthetic", "placeholder", user_agent=UA, session=session)
+        second = OCEAApiClient("synthetic", "placeholder", user_agent=UA, session=session)
         data = {
             "resident": {"resident": {"resident": {"resident": {"secret-deep": "secret"}}}},
             **{f"secret-{index}": "secret" for index in range(60)},
@@ -414,7 +414,7 @@ async def test_debug_reports_safe_formats_without_logging_values(caplog):
         ],
     }
     async with aiohttp.ClientSession() as session:
-        client = OceaApiClient("synthetic", "placeholder", user_agent=UA, session=session)
+        client = OCEAApiClient("synthetic", "placeholder", user_agent=UA, session=session)
         with caplog.at_level(logging.DEBUG, logger=client.__class__.__module__):
             client._log_response("consumption", data)
 
@@ -455,7 +455,7 @@ async def test_unknown_fields_and_optional_values_are_retained(
         str(server.make_url("/")).rstrip("/"),
     )
     async with aiohttp.ClientSession() as session:
-        client = OceaApiClient("synthetic", "placeholder", user_agent=UA, session=session)
+        client = OCEAApiClient("synthetic", "placeholder", user_agent=UA, session=session)
         client._auth._access_token = "placeholder"
         if method == "dashboard":
             result = await client.get_consumptions("local")
@@ -507,7 +507,7 @@ async def test_consumption_variants_and_unclassified_items(
         str(server.make_url("/")).rstrip("/"),
     )
     async with aiohttp.ClientSession() as session:
-        client = OceaApiClient("synthetic", "placeholder", user_agent=UA, session=session)
+        client = OCEAApiClient("synthetic", "placeholder", user_agent=UA, session=session)
         client._auth._access_token = "placeholder"
         result = await client.get_pds_consumption(
             "local", "pds", {"debut": "start", "fin": "end", "granularity": "Day"}
@@ -515,12 +515,12 @@ async def test_consumption_variants_and_unclassified_items(
 
     assert result.raw == response
     assert [type(item) for item in result.items] == [
-        OceaGenericConsumptionData,
-        OceaWaterConsumptionData,
-        OceaRfcConsumptionData,
-        OceaUnclassifiedConsumptionData,
-        OceaUnclassifiedConsumptionData,
-        OceaUnclassifiedConsumptionData,
+        OCEAGenericConsumptionData,
+        OCEAWaterConsumptionData,
+        OCEARfcConsumptionData,
+        OCEAUnclassifiedConsumptionData,
+        OCEAUnclassifiedConsumptionData,
+        OCEAUnclassifiedConsumptionData,
     ]
     assert result.unit == "m3"
     assert result.items[0].value == 1
@@ -552,7 +552,7 @@ async def test_invalid_reading_fields_do_not_discard_the_series(aiohttp_server, 
         str(server.make_url("/")).rstrip("/"),
     )
     async with aiohttp.ClientSession() as session:
-        client = OceaApiClient("synthetic", "placeholder", user_agent=UA, session=session)
+        client = OCEAApiClient("synthetic", "placeholder", user_agent=UA, session=session)
         client._auth._access_token = "placeholder"
         result = await client.get_pds_consumption(
             "local", "pds", {"debut": "start", "fin": "end", "granularity": "Day"}
@@ -580,9 +580,9 @@ async def test_invalid_leak_estimate_is_rejected_for_all_types(
         str(server.make_url("/")).rstrip("/"),
     )
     async with aiohttp.ClientSession() as session:
-        client = OceaApiClient("synthetic", "placeholder", user_agent=UA, session=session)
+        client = OCEAApiClient("synthetic", "placeholder", user_agent=UA, session=session)
         client._auth._access_token = "placeholder"
-        with pytest.raises(OceaApiError, match="Invalid API field: fuiteEstimee"):
+        with pytest.raises(OCEAApiError, match="Invalid API field: fuiteEstimee"):
             await client.get_pds_consumption(
                 "local", "pds", {"debut": "start", "fin": "end", "granularity": "Day"}
             )

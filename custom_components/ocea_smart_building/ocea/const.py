@@ -1,4 +1,4 @@
-"""Ocea resident API protocol constants."""
+"""OCEA resident API protocol constants."""
 
 from zoneinfo import ZoneInfo
 

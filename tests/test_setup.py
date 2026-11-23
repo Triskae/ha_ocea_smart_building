@@ -23,9 +23,9 @@ from custom_components.ocea_smart_building import (
 from custom_components.ocea_smart_building.const import CONF_LOCAL_ID, DOMAIN
 from custom_components.ocea_smart_building.history import history_store
 from custom_components.ocea_smart_building.ocea.models import (
-    OceaConsumptionSeries,
-    OceaDashboardData,
-    OceaPdsData,
+    OCEAConsumptionSeries,
+    OCEADashboardData,
+    OCEAPdsData,
 )
 
 
@@ -87,17 +87,17 @@ async def test_migration_and_reload_preserve_leaks_without_restoring_consumption
     )
 
     with (
-        patch("custom_components.ocea_smart_building.OceaApiClient", autospec=True) as client,
-        patch("custom_components.ocea_smart_building.OceaHistoryManager", autospec=True),
+        patch("custom_components.ocea_smart_building.OCEAApiClient", autospec=True) as client,
+        patch("custom_components.ocea_smart_building.OCEAHistoryManager", autospec=True),
     ):
         client.return_value.get_pds.return_value = [
-            OceaPdsData.from_api({"id": "pds-1", "fluide": "EauFroide"})
+            OCEAPdsData.from_api({"id": "pds-1", "fluide": "EauFroide"})
         ]
         client.return_value.get_appareils.return_value = []
         client.return_value.get_consumptions.return_value = [
-            OceaDashboardData.from_api({"fluide": "EauFroide", "valeur": "1"})
+            OCEADashboardData.from_api({"fluide": "EauFroide", "valeur": "1"})
         ]
-        client.return_value.get_pds_consumption.return_value = OceaConsumptionSeries.from_api({
+        client.return_value.get_pds_consumption.return_value = OCEAConsumptionSeries.from_api({
             "unite": "m3",
             "consommations": [{
                 "date": "2024-01-01",
@@ -150,7 +150,7 @@ async def test_unload_cancels_history_task(hass: HomeAssistant) -> None:
             cancelled.set()
             raise
 
-    with patch("custom_components.ocea_smart_building.OceaApiClient", autospec=True) as client:
+    with patch("custom_components.ocea_smart_building.OCEAApiClient", autospec=True) as client:
         client.return_value.get_resident.side_effect = blocked_resident
         client.return_value.get_pds.return_value = []
         client.return_value.get_appareils.return_value = []
@@ -174,21 +174,21 @@ async def test_setup_keeps_only_water_leak_entities(
     )
     entry.add_to_hass(hass)
     with (
-        patch("custom_components.ocea_smart_building.OceaApiClient", autospec=True) as client,
-        patch("custom_components.ocea_smart_building.OceaHistoryManager", autospec=True),
+        patch("custom_components.ocea_smart_building.OCEAApiClient", autospec=True) as client,
+        patch("custom_components.ocea_smart_building.OCEAHistoryManager", autospec=True),
     ):
         client.return_value.get_pds.return_value = [
-            OceaPdsData.from_api({"id": "pds-1", "fluide": "EauFroide"}),
-            OceaPdsData.from_api({"id": "pds-2", "fluide": "Cetc"}),
-            OceaPdsData.from_api({"id": "pds-3", "fluide": "CETC"}),
+            OCEAPdsData.from_api({"id": "pds-1", "fluide": "EauFroide"}),
+            OCEAPdsData.from_api({"id": "pds-2", "fluide": "Cetc"}),
+            OCEAPdsData.from_api({"id": "pds-3", "fluide": "CETC"}),
         ]
         client.return_value.get_appareils.return_value = []
         client.return_value.get_consumptions.return_value = [
-            OceaDashboardData.from_api({"fluide": "EauFroide", "valeur": "1"}),
-            OceaDashboardData.from_api({"fluide": "Cetc", "valeur": "2"}),
+            OCEADashboardData.from_api({"fluide": "EauFroide", "valeur": "1"}),
+            OCEADashboardData.from_api({"fluide": "Cetc", "valeur": "2"}),
         ]
         client.return_value.get_pds_consumption.side_effect = [
-            OceaConsumptionSeries.from_api({
+            OCEAConsumptionSeries.from_api({
                 "unite": "m3",
                 "consommations": [
                     {
@@ -199,7 +199,7 @@ async def test_setup_keeps_only_water_leak_entities(
                     }
                 ],
             }),
-            OceaConsumptionSeries.from_api({
+            OCEAConsumptionSeries.from_api({
                 "unite": "kWh",
                 "consommations": [
                     {
@@ -209,7 +209,7 @@ async def test_setup_keeps_only_water_leak_entities(
                     }
                 ],
             }),
-            OceaConsumptionSeries.from_api({
+            OCEAConsumptionSeries.from_api({
                 "unite": "m3",
                 "consommations": [
                     {
@@ -220,7 +220,7 @@ async def test_setup_keeps_only_water_leak_entities(
                     }
                 ],
             }),
-            OceaConsumptionSeries.from_api({
+            OCEAConsumptionSeries.from_api({
                 "unite": "kWh",
                 "consommations": [
                     {
@@ -267,9 +267,9 @@ async def test_setup_stores_coordinator_in_entry_runtime_data(
     entry.add_to_hass(hass)
 
     with (
-        patch("custom_components.ocea_smart_building.OceaApiClient"),
+        patch("custom_components.ocea_smart_building.OCEAApiClient"),
         patch(
-            "custom_components.ocea_smart_building.OceaDataUpdateCoordinator"
+            "custom_components.ocea_smart_building.OCEADataUpdateCoordinator"
         ) as coordinator_class,
         patch.object(
             hass.config_entries,
@@ -300,9 +300,9 @@ async def test_setup_closes_client_when_first_refresh_fails(
     entry.add_to_hass(hass)
 
     with (
-        patch("custom_components.ocea_smart_building.OceaApiClient") as client_class,
+        patch("custom_components.ocea_smart_building.OCEAApiClient") as client_class,
         patch(
-            "custom_components.ocea_smart_building.OceaDataUpdateCoordinator"
+            "custom_components.ocea_smart_building.OCEADataUpdateCoordinator"
         ) as coordinator_class,
     ):
         coordinator_class.return_value.async_config_entry_first_refresh.side_effect = (
@@ -324,8 +324,8 @@ async def test_setup_detaches_session_when_cancelled(hass: HomeAssistant) -> Non
     )
     entry.add_to_hass(hass)
     with (
-        patch("custom_components.ocea_smart_building.OceaApiClient") as client_class,
-        patch("custom_components.ocea_smart_building.OceaDataUpdateCoordinator", autospec=True) as coordinator_class,
+        patch("custom_components.ocea_smart_building.OCEAApiClient") as client_class,
+        patch("custom_components.ocea_smart_building.OCEADataUpdateCoordinator", autospec=True) as coordinator_class,
     ):
         coordinator_class.return_value.async_config_entry_first_refresh.side_effect = asyncio.CancelledError
         with pytest.raises(asyncio.CancelledError):
@@ -348,8 +348,8 @@ async def test_setup_detaches_session_when_platform_setup_fails(
     )
     entry.add_to_hass(hass)
     with (
-        patch("custom_components.ocea_smart_building.OceaApiClient") as client_class,
-        patch("custom_components.ocea_smart_building.OceaDataUpdateCoordinator", autospec=True),
+        patch("custom_components.ocea_smart_building.OCEAApiClient") as client_class,
+        patch("custom_components.ocea_smart_building.OCEADataUpdateCoordinator", autospec=True),
         patch.object(
             hass.config_entries,
             "async_forward_entry_setups",
@@ -371,9 +371,9 @@ async def test_session_is_detached_after_entry_unload(hass: HomeAssistant) -> No
     )
     entry.add_to_hass(hass)
     with (
-        patch("custom_components.ocea_smart_building.OceaApiClient") as client_class,
-        patch("custom_components.ocea_smart_building.OceaDataUpdateCoordinator", autospec=True),
-        patch("custom_components.ocea_smart_building.OceaHistoryManager", autospec=True),
+        patch("custom_components.ocea_smart_building.OCEAApiClient") as client_class,
+        patch("custom_components.ocea_smart_building.OCEADataUpdateCoordinator", autospec=True),
+        patch("custom_components.ocea_smart_building.OCEAHistoryManager", autospec=True),
         patch.object(hass.config_entries, "async_forward_entry_setups", new_callable=AsyncMock),
         patch.object(hass.config_entries, "async_unload_platforms", new_callable=AsyncMock, return_value=True),
     ):
@@ -400,17 +400,17 @@ async def test_unload_removes_sensor_update_listener(hass: HomeAssistant) -> Non
     )
     entry.add_to_hass(hass)
     with (
-        patch("custom_components.ocea_smart_building.OceaApiClient", autospec=True) as client,
-        patch("custom_components.ocea_smart_building.OceaHistoryManager", autospec=True),
+        patch("custom_components.ocea_smart_building.OCEAApiClient", autospec=True) as client,
+        patch("custom_components.ocea_smart_building.OCEAHistoryManager", autospec=True),
     ):
         client.return_value.get_pds.return_value = [
-            OceaPdsData.from_api({"id": "pds-1", "fluide": "EauFroide"})
+            OCEAPdsData.from_api({"id": "pds-1", "fluide": "EauFroide"})
         ]
         client.return_value.get_appareils.return_value = []
         client.return_value.get_consumptions.return_value = [
-            OceaDashboardData.from_api({"fluide": "EauFroide", "valeur": "1"})
+            OCEADashboardData.from_api({"fluide": "EauFroide", "valeur": "1"})
         ]
-        client.return_value.get_pds_consumption.return_value = OceaConsumptionSeries.from_api(
+        client.return_value.get_pds_consumption.return_value = OCEAConsumptionSeries.from_api(
             {"consommations": []}
         )
 

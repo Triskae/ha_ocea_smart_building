@@ -171,18 +171,18 @@ def test_protected_rule_status_regression_is_detected(value: object) -> None:
 def test_common_modules_for_active_coordinator_and_entity_classes() -> None:
     """Guard the integration's shared classes, not the whole HA rule."""
     _assert_class_layout(
-        coordinator.OceaDataUpdateCoordinator,
+        coordinator.OCEADataUpdateCoordinator,
         DataUpdateCoordinator,
         "custom_components.ocea_smart_building.coordinator",
     )
     _assert_class_layout(
-        entity.OceaEntity,
+        entity.OCEAEntity,
         CoordinatorEntity,
         "custom_components.ocea_smart_building.entity",
     )
-    assert integration.OceaDataUpdateCoordinator is coordinator.OceaDataUpdateCoordinator
-    assert sensor.OceaDataUpdateCoordinator is coordinator.OceaDataUpdateCoordinator
-    assert binary_sensor.OceaDataUpdateCoordinator is coordinator.OceaDataUpdateCoordinator
+    assert integration.OCEADataUpdateCoordinator is coordinator.OCEADataUpdateCoordinator
+    assert sensor.OCEADataUpdateCoordinator is coordinator.OCEADataUpdateCoordinator
+    assert binary_sensor.OCEADataUpdateCoordinator is coordinator.OCEADataUpdateCoordinator
     for platform in (sensor, binary_sensor):
         entity_classes = [
             cls
@@ -190,7 +190,7 @@ def test_common_modules_for_active_coordinator_and_entity_classes() -> None:
             if cls.__module__ == platform.__name__ and issubclass(cls, Entity)
         ]
         assert entity_classes, platform.__name__
-        assert all(issubclass(cls, entity.OceaEntity) for cls in entity_classes)
+        assert all(issubclass(cls, entity.OCEAEntity) for cls in entity_classes)
 
 
 @pytest.mark.parametrize("invalid", ["module", "base"])

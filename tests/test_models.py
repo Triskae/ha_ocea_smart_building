@@ -1,4 +1,4 @@
-"""Tests for typed Ocea meter models."""
+"""Tests for typed OCEA meter models."""
 
 from __future__ import annotations
 
@@ -8,20 +8,20 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from custom_components.ocea_smart_building.coordinator import OceaMeterReading
+from custom_components.ocea_smart_building.coordinator import OCEAMeterReading
 from custom_components.ocea_smart_building.entity import meter_device_info
-from custom_components.ocea_smart_building.ocea import OceaApiError, OceaMeter, OceaPds
+from custom_components.ocea_smart_building.ocea import OCEAApiError, OCEAMeter, OCEAPds
 from custom_components.ocea_smart_building.ocea.models import (
     OccupationStatus,
-    OceaAddress,
-    OceaConsumptionSeries,
-    OceaDashboardData,
-    OceaDwellingDetails,
-    OceaDwellingFluids,
-    OceaOccupation,
-    OceaResident,
-    OceaRfcConsumptionData,
-    OceaWaterConsumptionData,
+    OCEAAddress,
+    OCEAConsumptionSeries,
+    OCEADashboardData,
+    OCEADwellingDetails,
+    OCEADwellingFluids,
+    OCEAOccupation,
+    OCEAResident,
+    OCEARfcConsumptionData,
+    OCEAWaterConsumptionData,
     is_generic_consumption,
     is_rfc_consumption,
     is_water_consumption,
@@ -43,10 +43,10 @@ from custom_components.ocea_smart_building.ocea.models import (
 )
 def test_consumption_values_are_finite_decimals(raw, expected) -> None:
     """Convert supported JSON numbers without inventing missing values."""
-    data = OceaConsumptionSeries.from_api({"consommations": [{"valeur": raw}]})
+    data = OCEAConsumptionSeries.from_api({"consommations": [{"valeur": raw}]})
     assert data.items[0].value == expected
     assert data.raw["consommations"] == [{"valeur": raw}]
-    assert OceaDashboardData.from_api({"valeur": raw}).value == expected
+    assert OCEADashboardData.from_api({"valeur": raw}).value == expected
 
 
 @pytest.mark.parametrize(
@@ -74,7 +74,7 @@ def test_consumption_values_are_finite_decimals(raw, expected) -> None:
 )
 def test_consumption_dates_preserve_day_or_instant(raw, expected) -> None:
     """Preserve explicit offsets and reject ambiguous or nonexistent Paris times."""
-    data = OceaConsumptionSeries.from_api({"consommations": [{"date": raw, "valeur": 1}]})
+    data = OCEAConsumptionSeries.from_api({"consommations": [{"date": raw, "valeur": 1}]})
     assert data.items[0].date == expected
     assert type(data.items[0].date) is type(expected)
     if isinstance(expected, datetime) and isinstance(data.items[0].date, datetime):
@@ -87,11 +87,11 @@ def test_optional_consumption_numbers_are_typed_and_invalid_values_are_reported(
         {"type": "ConsommationRfcResponse", "valeur": 1, "valeurCoefficientee": "1,50"},
         {"type": "ConsommationEauResponse", "valeur": 2, "fuiteEstimee": "private-value"},
     ]}
-    series = OceaConsumptionSeries.from_api(data)
+    series = OCEAConsumptionSeries.from_api(data)
     corrected, water = series.items
-    assert isinstance(corrected, OceaRfcConsumptionData)
+    assert isinstance(corrected, OCEARfcConsumptionData)
     assert corrected.corrected_value == Decimal("1.50")
-    assert isinstance(water, OceaWaterConsumptionData)
+    assert isinstance(water, OCEAWaterConsumptionData)
     assert water.estimated_leak is None
     assert "Invalid optional consumption value" in caplog.text
     assert "private-value" not in caplog.text
@@ -126,8 +126,8 @@ def test_consumption_variant_guards(item, expected) -> None:
 
 
 def test_pds_model_maps_ocea_response() -> None:
-    """Test PDS fields are normalized from the Ocea response."""
-    pds = OceaPds.from_api(
+    """Test PDS fields are normalized from the OCEA response."""
+    pds = OCEAPds.from_api(
         {
             "id": "pds-cold-1",
             "code": "code-1",
@@ -138,7 +138,7 @@ def test_pds_model_maps_ocea_response() -> None:
         }
     )
 
-    assert pds == OceaPds(
+    assert pds == OCEAPds(
         id="pds-cold-1",
         fluid="EauFroide",
         code="code-1",
@@ -149,8 +149,8 @@ def test_pds_model_maps_ocea_response() -> None:
 
 
 def test_meter_model_links_pds_and_device() -> None:
-    """Test a PDS is enriched with its Ocea device metadata."""
-    meter = OceaMeter.from_api(
+    """Test a PDS is enriched with its OCEA device metadata."""
+    meter = OCEAMeter.from_api(
         {
             "id": "pds-cold-1",
             "fluide": "EauFroide",
@@ -174,7 +174,7 @@ def test_meter_model_links_pds_and_device() -> None:
 
 def test_meter_display_name_falls_back_to_pds_id() -> None:
     """Test meter naming remains useful without a serial number."""
-    meter = OceaMeter.from_api(
+    meter = OCEAMeter.from_api(
         {"id": "pds-cold-1", "fluide": "EauFroide"},
         None,
     )
@@ -186,12 +186,12 @@ def test_meter_display_name_falls_back_to_pds_id() -> None:
 
 def test_meter_reading_can_be_unavailable() -> None:
     """Test an unavailable reading still identifies its meter."""
-    meter = OceaMeter.from_api(
+    meter = OCEAMeter.from_api(
         {"id": "pds-cold-1", "fluide": "EauFroide"},
         None,
     )
 
-    reading = OceaMeterReading(meter=meter, value=None, latest_date=None)
+    reading = OCEAMeterReading(meter=meter, value=None, latest_date=None)
 
     assert reading.meter is meter
     assert reading.value is None
@@ -200,7 +200,7 @@ def test_meter_reading_can_be_unavailable() -> None:
 
 def test_meter_keeps_ocea_device_factor() -> None:
     """Test the device correction factor is retained when provided."""
-    meter = OceaMeter.from_api(
+    meter = OCEAMeter.from_api(
         {"id": "pds-cold-1", "fluide": "EauFroide"},
         {"pdsId": "pds-cold-1", "fc": 1.25},
     )
@@ -210,12 +210,12 @@ def test_meter_keeps_ocea_device_factor() -> None:
 
 def test_meter_reading_keeps_consumption_metadata() -> None:
     """Test consumption metadata is represented by the typed reading."""
-    meter = OceaMeter.from_api(
+    meter = OCEAMeter.from_api(
         {"id": "pds-cold-1", "fluide": "EauFroide"},
         None,
     )
 
-    reading = OceaMeterReading(
+    reading = OCEAMeterReading(
         meter=meter,
         value=Decimal("0.321"),
         latest_date=date(2026, 9, 15),
@@ -237,13 +237,13 @@ def test_meter_reading_keeps_consumption_metadata() -> None:
 )
 def test_invalid_device_fields_are_explicit_errors(field: str, value: object) -> None:
     """Reject invalid response types without including field values in errors."""
-    with pytest.raises(OceaApiError, match="Invalid meter field"):
-        OceaMeter.from_api({"id": "pds-1"}, {field: value})
+    with pytest.raises(OCEAApiError, match="Invalid meter field"):
+        OCEAMeter.from_api({"id": "pds-1"}, {field: value})
 
 
 def test_invalid_pds_factor_is_an_explicit_error() -> None:
-    with pytest.raises(OceaApiError, match="Invalid meter field: fce"):
-        OceaPds.from_api({"id": "pds-1", "fce": True})
+    with pytest.raises(OCEAApiError, match="Invalid meter field: fce"):
+        OCEAPds.from_api({"id": "pds-1", "fce": True})
 
 
 @pytest.mark.parametrize(
@@ -263,13 +263,13 @@ def test_invalid_pds_factor_is_an_explicit_error() -> None:
     ],
 )
 def test_occupation_status(start: object, end: object, expected: OccupationStatus) -> None:
-    occupation = OceaOccupation.from_api({"dateDebut": start, "dateFin": end})
+    occupation = OCEAOccupation.from_api({"dateDebut": start, "dateFin": end})
     assert occupation.status(datetime(2026, 1, 1, tzinfo=timezone.utc)) == expected
 
 
 def test_occupation_preserves_offset_and_compares_instants() -> None:
     """Keep the original calendar day while comparing aware instants."""
-    occupation = OceaOccupation.from_api({
+    occupation = OCEAOccupation.from_api({
         "dateDebut": "2026-01-01T00:00:00+01:00",
         "dateFin": "2026-01-02T00:00:00+01:00",
     })
@@ -291,12 +291,12 @@ def test_occupation_preserves_offset_and_compares_instants() -> None:
 
 
 def test_occupation_missing_end_is_unknown() -> None:
-    occupation = OceaOccupation.from_api({"dateDebut": "2024-01-01T00:00:00Z"})
+    occupation = OCEAOccupation.from_api({"dateDebut": "2024-01-01T00:00:00Z"})
     assert occupation.status(datetime(2026, 1, 1, tzinfo=timezone.utc)) is OccupationStatus.UNKNOWN
 
 
 def test_resident_deduplicates_and_does_not_infer_conflicting_statuses() -> None:
-    resident = OceaResident.from_api({
+    resident = OCEAResident.from_api({
         "resident": {"prenom": "Synthetic"},
         "occupations": [
             {"logementId": "one", "dateDebut": "2024-01-01T00:00:00Z", "dateFin": None},
@@ -319,8 +319,8 @@ def test_resident_deduplicates_and_does_not_infer_conflicting_statuses() -> None
     ],
 )
 def test_invalid_resident_fields_raise(data: dict[str, object]) -> None:
-    with pytest.raises(OceaApiError):
-        OceaResident.from_api(data)
+    with pytest.raises(OCEAApiError):
+        OCEAResident.from_api(data)
 
 
 @pytest.mark.parametrize(
@@ -328,7 +328,7 @@ def test_invalid_resident_fields_raise(data: dict[str, object]) -> None:
     [
         ({"local": {}}, None),
         ({"local": {}, "fluidesRestitues": None}, None),
-        ({"local": {"adresse": {}}}, OceaAddress()),
+        ({"local": {"adresse": {}}}, OCEAAddress()),
         (
             {"local": {"adresse": {
                 "numeroRue": 7,
@@ -337,7 +337,7 @@ def test_invalid_resident_fields_raise(data: dict[str, object]) -> None:
                 "codePostal": "12345",
                 "pays": "Country",
             }}},
-            OceaAddress(
+            OCEAAddress(
                 street_number="7",
                 complement=" Unit A ",
                 postal_code="12345",
@@ -347,16 +347,16 @@ def test_invalid_resident_fields_raise(data: dict[str, object]) -> None:
         ),
     ],
 )
-def test_dwelling_address(data: dict[str, object], expected: OceaAddress | None) -> None:
-    assert OceaDwellingDetails.from_api(data) == OceaDwellingDetails(address=expected)
+def test_dwelling_address(data: dict[str, object], expected: OCEAAddress | None) -> None:
+    assert OCEADwellingDetails.from_api(data) == OCEADwellingDetails(address=expected)
 
 
 @pytest.mark.parametrize(
     "data", [{}, {"local": {"adresse": []}}, {"local": {"adresse": {"ville": []}}}]
 )
 def test_invalid_dwelling_details_raise(data: dict[str, object]) -> None:
-    with pytest.raises(OceaApiError):
-        OceaDwellingDetails.from_api(data)
+    with pytest.raises(OCEAApiError):
+        OCEADwellingDetails.from_api(data)
 
 
 @pytest.mark.parametrize(
@@ -373,7 +373,7 @@ def test_invalid_dwelling_details_raise(data: dict[str, object]) -> None:
 )
 def test_dwelling_fluids(data: dict[str, object], expected: tuple[str, ...]) -> None:
     """Map all advertised fluids independently of the address."""
-    assert OceaDwellingFluids.from_api(data).fluids == expected
+    assert OCEADwellingFluids.from_api(data).fluids == expected
 
 
 @pytest.mark.parametrize(
@@ -383,5 +383,5 @@ def test_dwelling_fluids(data: dict[str, object], expected: tuple[str, ...]) -> 
 )
 def test_invalid_dwelling_fluids_raise(data: dict[str, object]) -> None:
     """Reject malformed discovery data instead of treating it as an empty list."""
-    with pytest.raises(OceaApiError, match="Invalid dwelling fluid"):
-        OceaDwellingFluids.from_api(data)
+    with pytest.raises(OCEAApiError, match="Invalid dwelling fluid"):
+        OCEADwellingFluids.from_api(data)

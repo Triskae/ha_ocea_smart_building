@@ -1,4 +1,4 @@
-"""Models of Ocea API data."""
+"""Models of OCEA API data."""
 
 from __future__ import annotations
 
@@ -11,18 +11,18 @@ from enum import StrEnum
 from typing import Literal, NotRequired, TypedDict, TypeGuard, cast
 
 from .const import OCEA_TIME_ZONE
-from .exceptions import OceaApiError
+from .exceptions import OCEAApiError
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class OceaDevicesRequest(TypedDict):
+class OCEADevicesRequest(TypedDict):
     """Request for devices associated with measurement points."""
 
     pdsIds: list[str]
 
 
-class OceaConsumptionRequest(TypedDict):
+class OCEAConsumptionRequest(TypedDict):
     """Date range and granularity for a consumption request."""
 
     debut: str
@@ -30,7 +30,7 @@ class OceaConsumptionRequest(TypedDict):
     granularity: str
 
 
-class OceaDashboardConsumption(TypedDict, total=False):
+class OCEADashboardConsumption(TypedDict, total=False):
     """Known fields of a dashboard consumption."""
 
     fluide: str
@@ -38,20 +38,20 @@ class OceaDashboardConsumption(TypedDict, total=False):
     unite: str | None
 
 
-class OceaPdsResponse(TypedDict, total=False):
+class OCEAPdsResponse(TypedDict, total=False):
     """Point-of-measurement fields used for discovery."""
 
     id: str | int | None
     fluide: str | None
 
 
-class OceaDeviceResponse(TypedDict, total=False):
+class OCEADeviceResponse(TypedDict, total=False):
     """Device field used to match a measurement point."""
 
     pdsId: str | int | None
 
 
-class OceaConsumptionBase(TypedDict, total=False):
+class OCEAConsumptionBase(TypedDict, total=False):
     """Fields shared by the portal's dated consumption variants."""
 
     date: object
@@ -59,14 +59,14 @@ class OceaConsumptionBase(TypedDict, total=False):
     consentement: bool | None
 
 
-class OceaGenericConsumption(OceaConsumptionBase):
+class OCEAGenericConsumption(OCEAConsumptionBase):
     """Generic consumption identified by the portal."""
 
     type: Literal["ConsommationResponse"]
     isEstimated: NotRequired[bool | None]
 
 
-class OceaWaterConsumption(OceaConsumptionBase):
+class OCEAWaterConsumption(OCEAConsumptionBase):
     """Water consumption and its optional estimated leak."""
 
     type: Literal["ConsommationEauResponse"]
@@ -74,7 +74,7 @@ class OceaWaterConsumption(OceaConsumptionBase):
     fuiteEstimee: NotRequired[str | int | float | None]
 
 
-class OceaRfcConsumption(OceaConsumptionBase):
+class OCEARfcConsumption(OCEAConsumptionBase):
     """Heating allocator consumption identified by the portal."""
 
     type: Literal["ConsommationRfcResponse"]
@@ -83,7 +83,7 @@ class OceaRfcConsumption(OceaConsumptionBase):
     emplacement: NotRequired[str | None]
 
 
-class OceaUnclassifiedConsumption(OceaConsumptionBase, total=False):
+class OCEAUnclassifiedConsumption(OCEAConsumptionBase, total=False):
     """Compatible fallback when a response cannot be classified safely."""
 
     type: str | None
@@ -91,15 +91,15 @@ class OceaUnclassifiedConsumption(OceaConsumptionBase, total=False):
     fuiteEstimee: str | int | float | None
 
 
-type OceaConsumptionItem = (
-    OceaGenericConsumption
-    | OceaWaterConsumption
-    | OceaRfcConsumption
-    | OceaUnclassifiedConsumption
+type OCEAConsumptionItem = (
+    OCEAGenericConsumption
+    | OCEAWaterConsumption
+    | OCEARfcConsumption
+    | OCEAUnclassifiedConsumption
 )
 
 
-def is_water_consumption(item: OceaConsumptionItem) -> TypeGuard[OceaWaterConsumption]:
+def is_water_consumption(item: OCEAConsumptionItem) -> TypeGuard[OCEAWaterConsumption]:
     """Identify a water item whose optional estimate flag has a known type."""
     estimated = item.get("isEstimated")
     return item.get("type") == "ConsommationEauResponse" and (
@@ -107,7 +107,7 @@ def is_water_consumption(item: OceaConsumptionItem) -> TypeGuard[OceaWaterConsum
     )
 
 
-def is_rfc_consumption(item: OceaConsumptionItem) -> TypeGuard[OceaRfcConsumption]:
+def is_rfc_consumption(item: OCEAConsumptionItem) -> TypeGuard[OCEARfcConsumption]:
     """Identify an RFC item only when its optional fields have known types."""
     estimated = item.get("isEstimated")
     coefficient = item.get("valeurCoefficientee")
@@ -122,7 +122,7 @@ def is_rfc_consumption(item: OceaConsumptionItem) -> TypeGuard[OceaRfcConsumptio
     )
 
 
-def is_generic_consumption(item: OceaConsumptionItem) -> TypeGuard[OceaGenericConsumption]:
+def is_generic_consumption(item: OCEAConsumptionItem) -> TypeGuard[OCEAGenericConsumption]:
     """Identify a generic item whose optional estimate flag has a known type."""
     estimated = item.get("isEstimated")
     return item.get("type") == "ConsommationResponse" and (
@@ -131,21 +131,21 @@ def is_generic_consumption(item: OceaConsumptionItem) -> TypeGuard[OceaGenericCo
 
 
 def has_leak_estimate(
-    item: OceaConsumptionItem,
-) -> TypeGuard[OceaWaterConsumption | OceaUnclassifiedConsumption]:
+    item: OCEAConsumptionItem,
+) -> TypeGuard[OCEAWaterConsumption | OCEAUnclassifiedConsumption]:
     """Identify validated leak fields, including legacy unclassified items."""
     return "fuiteEstimee" in item
 
 
-class OceaConsumptionResponse(TypedDict, total=False):
+class OCEAConsumptionResponse(TypedDict, total=False):
     """Known fields of a measurement point's consumption response."""
 
     unite: str | None
-    consommations: list[OceaConsumptionItem]
+    consommations: list[OCEAConsumptionItem]
 
 
 @dataclass(frozen=True, slots=True)
-class OceaDashboardData:
+class OCEADashboardData:
     """Validated dashboard consumption."""
 
     fluid: str
@@ -154,13 +154,13 @@ class OceaDashboardData:
     raw: Mapping[str, object] = field(repr=False, compare=False)
 
     @classmethod
-    def from_api(cls, data: OceaDashboardConsumption) -> OceaDashboardData:
+    def from_api(cls, data: OCEADashboardConsumption) -> OCEADashboardData:
         """Convert a validated dashboard item."""
         return cls(data.get("fluide", ""), _decimal(data.get("valeur")), data.get("unite"), data)
 
 
 @dataclass(frozen=True, slots=True)
-class OceaPdsData:
+class OCEAPdsData:
     """A discovered measurement point before filtering unsupported fluids."""
 
     id: str | int | None
@@ -168,30 +168,30 @@ class OceaPdsData:
     raw: Mapping[str, object] = field(repr=False, compare=False)
 
     @classmethod
-    def from_api(cls, data: OceaPdsResponse) -> OceaPdsData:
+    def from_api(cls, data: OCEAPdsResponse) -> OCEAPdsData:
         """Convert a validated point of measurement."""
         return cls(data.get("id"), data.get("fluide"), data)
 
-    def as_meter(self, device: OceaDeviceData | None) -> OceaMeter:
+    def as_meter(self, device: OCEADeviceData | None) -> OCEAMeter:
         """Validate selected meter metadata and attach the matching device."""
-        return OceaMeter.from_api(self.raw, device.raw if device is not None else None)
+        return OCEAMeter.from_api(self.raw, device.raw if device is not None else None)
 
 
 @dataclass(frozen=True, slots=True)
-class OceaDeviceData:
+class OCEADeviceData:
     """Device response matched to a measurement point."""
 
     pds_id: str | int | None
     raw: Mapping[str, object] = field(repr=False, compare=False)
 
     @classmethod
-    def from_api(cls, data: OceaDeviceResponse) -> OceaDeviceData:
+    def from_api(cls, data: OCEADeviceResponse) -> OCEADeviceData:
         """Convert a validated device response."""
         return cls(data.get("pdsId"), data)
 
 
 @dataclass(frozen=True, slots=True)
-class OceaConsumptionData:
+class OCEAConsumptionData:
     """Common validated data for one dated consumption."""
 
     date: date | datetime | None
@@ -202,14 +202,14 @@ class OceaConsumptionData:
 
 
 @dataclass(frozen=True, slots=True)
-class OceaGenericConsumptionData(OceaConsumptionData):
+class OCEAGenericConsumptionData(OCEAConsumptionData):
     """A generic consumption item."""
 
     is_estimated: bool | None
 
 
 @dataclass(frozen=True, slots=True)
-class OceaWaterConsumptionData(OceaConsumptionData):
+class OCEAWaterConsumptionData(OCEAConsumptionData):
     """A water consumption item."""
 
     is_estimated: bool | None
@@ -217,7 +217,7 @@ class OceaWaterConsumptionData(OceaConsumptionData):
 
 
 @dataclass(frozen=True, slots=True)
-class OceaRfcConsumptionData(OceaConsumptionData):
+class OCEARfcConsumptionData(OCEAConsumptionData):
     """A heating allocator consumption item."""
 
     is_estimated: bool | None
@@ -226,18 +226,18 @@ class OceaRfcConsumptionData(OceaConsumptionData):
 
 
 @dataclass(frozen=True, slots=True)
-class OceaUnclassifiedConsumptionData(OceaConsumptionData):
+class OCEAUnclassifiedConsumptionData(OCEAConsumptionData):
     """An item with an unknown or insufficiently validated discriminator."""
 
     is_estimated: object
     estimated_leak: Decimal | None
 
 
-type OceaConsumptionDataItem = (
-    OceaGenericConsumptionData
-    | OceaWaterConsumptionData
-    | OceaRfcConsumptionData
-    | OceaUnclassifiedConsumptionData
+type OCEAConsumptionDataItem = (
+    OCEAGenericConsumptionData
+    | OCEAWaterConsumptionData
+    | OCEARfcConsumptionData
+    | OCEAUnclassifiedConsumptionData
 )
 
 
@@ -288,7 +288,7 @@ def _reading_date(value: object) -> date | datetime | None:
     return valid[0]
 
 
-def _consumption_data(item: OceaConsumptionItem) -> OceaConsumptionDataItem:
+def _consumption_data(item: OCEAConsumptionItem) -> OCEAConsumptionDataItem:
     """Convert a validated item without assuming unknown variants are invalid."""
     common = (
         _reading_date(item.get("date")),
@@ -298,21 +298,21 @@ def _consumption_data(item: OceaConsumptionItem) -> OceaConsumptionDataItem:
         item,
     )
     if is_water_consumption(item):
-        return OceaWaterConsumptionData(
+        return OCEAWaterConsumptionData(
             *common, is_estimated=item.get("isEstimated"),
             estimated_leak=_optional_decimal(item.get("fuiteEstimee")),
         )
     if not has_leak_estimate(item):
         if is_rfc_consumption(item):
-            return OceaRfcConsumptionData(
+            return OCEARfcConsumptionData(
                 *common,
                 is_estimated=item.get("isEstimated"),
                 corrected_value=_optional_decimal(item.get("valeurCoefficientee")),
                 location=item.get("emplacement"),
             )
         if is_generic_consumption(item):
-            return OceaGenericConsumptionData(*common, is_estimated=item.get("isEstimated"))
-    return OceaUnclassifiedConsumptionData(
+            return OCEAGenericConsumptionData(*common, is_estimated=item.get("isEstimated"))
+    return OCEAUnclassifiedConsumptionData(
         *common,
         is_estimated=item.get("isEstimated"),
         estimated_leak=_optional_decimal(item.get("fuiteEstimee")) if has_leak_estimate(item) else None,
@@ -320,15 +320,15 @@ def _consumption_data(item: OceaConsumptionItem) -> OceaConsumptionDataItem:
 
 
 @dataclass(frozen=True, slots=True)
-class OceaConsumptionSeries:
+class OCEAConsumptionSeries:
     """A validated meter or dwelling consumption response."""
 
     unit: str | None
-    items: tuple[OceaConsumptionDataItem, ...]
+    items: tuple[OCEAConsumptionDataItem, ...]
     raw: Mapping[str, object] = field(repr=False, compare=False)
 
     @classmethod
-    def from_api(cls, data: OceaConsumptionResponse) -> OceaConsumptionSeries:
+    def from_api(cls, data: OCEAConsumptionResponse) -> OCEAConsumptionSeries:
         """Convert validated consumption items into typed variants."""
         return cls(
             unit=data.get("unite"),
@@ -347,16 +347,16 @@ def _validate_fields(
             if not isinstance(value, allowed) or (
                 isinstance(value, bool) and bool not in allowed
             ):
-                raise OceaApiError(f"Invalid API field: {key}")
+                raise OCEAApiError(f"Invalid API field: {key}")
 
 
-def is_dashboard_consumption(data: dict[str, object]) -> TypeGuard[OceaDashboardConsumption]:
+def is_dashboard_consumption(data: dict[str, object]) -> TypeGuard[OCEADashboardConsumption]:
     """Validate fields used from a dashboard response."""
     _validate_fields(data, {"fluide": (str,), "unite": (str, type(None))})
     return True
 
 
-def is_pds_response(data: dict[str, object]) -> TypeGuard[OceaPdsResponse]:
+def is_pds_response(data: dict[str, object]) -> TypeGuard[OCEAPdsResponse]:
     """Validate fields used from a measurement point response."""
     _validate_fields(
         data,
@@ -368,7 +368,7 @@ def is_pds_response(data: dict[str, object]) -> TypeGuard[OceaPdsResponse]:
     return True
 
 
-def is_device_response(data: dict[str, object]) -> TypeGuard[OceaDeviceResponse]:
+def is_device_response(data: dict[str, object]) -> TypeGuard[OCEADeviceResponse]:
     """Validate fields used from a device response."""
     _validate_fields(
         data,
@@ -379,16 +379,16 @@ def is_device_response(data: dict[str, object]) -> TypeGuard[OceaDeviceResponse]
     return True
 
 
-def is_consumption_response(data: dict[str, object]) -> TypeGuard[OceaConsumptionResponse]:
+def is_consumption_response(data: dict[str, object]) -> TypeGuard[OCEAConsumptionResponse]:
     """Validate consumption fields used by the coordinator."""
     _validate_fields(data, {"unite": (str, type(None))})
     if "consommations" in data:
         items = data["consommations"]
         if not isinstance(items, list):
-            raise OceaApiError("Invalid meter consumption list")
+            raise OCEAApiError("Invalid meter consumption list")
         for item in items:
             if not isinstance(item, dict):
-                raise OceaApiError("Invalid meter consumption item")
+                raise OCEAApiError("Invalid meter consumption item")
             _validate_fields(
                 item,
                 {
@@ -421,7 +421,7 @@ def _instant(value: object) -> datetime | None:
 
 
 @dataclass(frozen=True, slots=True)
-class OceaOccupation:
+class OCEAOccupation:
     """Untrusted occupation dates associated with a dwelling."""
 
     start: datetime | None
@@ -429,7 +429,7 @@ class OceaOccupation:
     open_ended: bool
 
     @classmethod
-    def from_api(cls, data: Mapping[str, object]) -> OceaOccupation:
+    def from_api(cls, data: Mapping[str, object]) -> OCEAOccupation:
         """Parse dates without assuming absent or malformed values are valid."""
         return cls(
             start=_instant(data.get("dateDebut")),
@@ -453,11 +453,11 @@ class OceaOccupation:
 
 
 @dataclass(frozen=True, slots=True)
-class OceaDwelling:
+class OCEADwelling:
     """A dwelling and its associated occupations."""
 
     local_id: str
-    occupations: tuple[OceaOccupation, ...]
+    occupations: tuple[OCEAOccupation, ...]
 
     def status(self, now: datetime) -> OccupationStatus:
         """Only report a status if all its occupations agree."""
@@ -466,45 +466,45 @@ class OceaDwelling:
 
 
 @dataclass(frozen=True, slots=True)
-class OceaResident:
+class OCEAResident:
     """Resident display name and deduplicated dwellings."""
 
     name: str
-    dwellings: tuple[OceaDwelling, ...]
+    dwellings: tuple[OCEADwelling, ...]
 
     @classmethod
-    def from_api(cls, data: Mapping[str, object]) -> OceaResident:
+    def from_api(cls, data: Mapping[str, object]) -> OCEAResident:
         """Validate resident and occupation shapes at the API boundary."""
         resident = data.get("resident", {})
         if not isinstance(resident, dict):
-            raise OceaApiError("Invalid resident response")
+            raise OCEAApiError("Invalid resident response")
         resident = cast(dict[str, object], resident)
         name = resident.get("prenom", "")
         if not isinstance(name, str):
-            raise OceaApiError("Invalid resident name")
+            raise OCEAApiError("Invalid resident name")
         raw_occupations = data.get("occupations", [])
         if not isinstance(raw_occupations, list):
-            raise OceaApiError("Invalid occupations response")
-        dwellings: dict[str, list[OceaOccupation]] = {}
+            raise OCEAApiError("Invalid occupations response")
+        dwellings: dict[str, list[OCEAOccupation]] = {}
         for raw in cast(list[object], raw_occupations):
             if not isinstance(raw, dict):
-                raise OceaApiError("Invalid occupation response")
+                raise OCEAApiError("Invalid occupation response")
             occupation = cast(dict[str, object], raw)
             local_id = occupation.get("logementId")
             if not isinstance(local_id, str) or not local_id.strip():
-                raise OceaApiError("Invalid dwelling identifier")
-            dwellings.setdefault(local_id, []).append(OceaOccupation.from_api(occupation))
+                raise OCEAApiError("Invalid dwelling identifier")
+            dwellings.setdefault(local_id, []).append(OCEAOccupation.from_api(occupation))
         return cls(
             name=name,
             dwellings=tuple(
-                OceaDwelling(local_id, tuple(occupations))
+                OCEADwelling(local_id, tuple(occupations))
                 for local_id, occupations in dwellings.items()
             ),
         )
 
 
 @dataclass(frozen=True, slots=True)
-class OceaAddress:
+class OCEAAddress:
     """Structured address returned by the dwelling endpoint."""
 
     street_number: str | None = None
@@ -514,12 +514,12 @@ class OceaAddress:
     country: str | None = None
 
     @classmethod
-    def from_api(cls, data: Mapping[str, object]) -> OceaAddress:
+    def from_api(cls, data: Mapping[str, object]) -> OCEAAddress:
         """Validate and retain the available address components."""
         def field(key: str) -> str | None:
             value = data.get(key)
             if value is not None and not isinstance(value, (str, int)):
-                raise OceaApiError("Invalid dwelling address field")
+                raise OCEAApiError("Invalid dwelling address field")
             return str(value) if value is not None else None
 
         return cls(
@@ -532,41 +532,41 @@ class OceaAddress:
 
 
 @dataclass(frozen=True, slots=True)
-class OceaDwellingDetails:
+class OCEADwellingDetails:
     """Validated details used to distinguish an accessible dwelling."""
 
-    address: OceaAddress | None
+    address: OCEAAddress | None
 
     @classmethod
-    def from_api(cls, data: Mapping[str, object]) -> OceaDwellingDetails:
+    def from_api(cls, data: Mapping[str, object]) -> OCEADwellingDetails:
         """Parse the available address from dwelling details."""
         local = data.get("local")
         if not isinstance(local, dict):
-            raise OceaApiError("Invalid dwelling details")
+            raise OCEAApiError("Invalid dwelling details")
         address = local.get("adresse")
         if address is None:
             return cls(address=None)
         if not isinstance(address, dict):
-            raise OceaApiError("Invalid dwelling address")
-        return cls(address=OceaAddress.from_api(cast(dict[str, object], address)))
+            raise OCEAApiError("Invalid dwelling address")
+        return cls(address=OCEAAddress.from_api(cast(dict[str, object], address)))
 
 
 @dataclass(frozen=True, slots=True)
-class OceaDwellingFluids:
+class OCEADwellingFluids:
     """Validated fluids advertised by the dwelling endpoint."""
 
     fluids: tuple[str, ...]
 
     @classmethod
-    def from_api(cls, data: Mapping[str, object]) -> OceaDwellingFluids:
+    def from_api(cls, data: Mapping[str, object]) -> OCEADwellingFluids:
         """Parse the advertised fluids without requiring address details."""
         fluids = data.get("fluidesRestitues")
         if not isinstance(fluids, list):
-            raise OceaApiError("Invalid dwelling fluids")
+            raise OCEAApiError("Invalid dwelling fluids")
         result: list[str] = []
         for item in fluids:
             if not isinstance(item, dict) or not isinstance(item.get("fluide"), str):
-                raise OceaApiError("Invalid dwelling fluid")
+                raise OCEAApiError("Invalid dwelling fluid")
             result.append(item["fluide"])
         return cls(fluids=tuple(result))
 
@@ -574,20 +574,20 @@ class OceaDwellingFluids:
 def _optional_string(data: Mapping[str, object], key: str) -> str | None:
     value = data.get(key)
     if value is not None and not isinstance(value, str):
-        raise OceaApiError(f"Invalid meter field: {key}")
+        raise OCEAApiError(f"Invalid meter field: {key}")
     return value
 
 
 def _optional_number(data: Mapping[str, object], key: str) -> float | None:
     value = data.get(key)
     if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
-        raise OceaApiError(f"Invalid meter field: {key}")
+        raise OCEAApiError(f"Invalid meter field: {key}")
     return value
 
 
 @dataclass(frozen=True, slots=True)
-class OceaPds:
-    """Ocea point of measurement metadata."""
+class OCEAPds:
+    """OCEA point of measurement metadata."""
 
     id: str
     fluid: str
@@ -597,8 +597,8 @@ class OceaPds:
     fce: float | None = None
 
     @classmethod
-    def from_api(cls, data: Mapping[str, object]) -> OceaPds:
-        """Build a PDS model from an Ocea response."""
+    def from_api(cls, data: Mapping[str, object]) -> OCEAPds:
+        """Build a PDS model from an OCEA response."""
         return cls(
             id=str(data.get("id", "")),
             fluid=str(data.get("fluide", "")),
@@ -610,10 +610,10 @@ class OceaPds:
 
 
 @dataclass(frozen=True, slots=True)
-class OceaMeter:
-    """Ocea PDS enriched with its installed device metadata."""
+class OCEAMeter:
+    """OCEA PDS enriched with its installed device metadata."""
 
-    pds: OceaPds
+    pds: OCEAPds
     device_id: str | None = None
     serial_number: str | None = None
     installation_date: str | None = None
@@ -621,7 +621,7 @@ class OceaMeter:
 
     @property
     def identifier(self) -> str:
-        """Return the stable Ocea identifier for this meter."""
+        """Return the stable OCEA identifier for this meter."""
         return self.pds.id
 
     @classmethod
@@ -629,11 +629,11 @@ class OceaMeter:
         cls,
         pds_data: Mapping[str, object],
         device_data: Mapping[str, object] | None,
-    ) -> OceaMeter:
+    ) -> OCEAMeter:
         """Build a meter model from PDS and device responses."""
         device = device_data or {}
         return cls(
-            pds=OceaPds.from_api(pds_data),
+            pds=OCEAPds.from_api(pds_data),
             device_id=_optional_string(device, "id"),
             serial_number=_optional_string(device, "numeroSerie"),
             installation_date=_optional_string(device, "datePose"),

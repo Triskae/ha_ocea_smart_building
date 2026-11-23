@@ -1,4 +1,4 @@
-"""Tests for Ocea leak binary sensors."""
+"""Tests for OCEA leak binary sensors."""
 
 from __future__ import annotations
 
@@ -10,32 +10,32 @@ from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ocea_smart_building.binary_sensor import OceaLeakBinarySensor
+from custom_components.ocea_smart_building.binary_sensor import OCEALeakBinarySensor
 from custom_components.ocea_smart_building.const import CONF_LOCAL_ID, DOMAIN
 from custom_components.ocea_smart_building.coordinator import (
-    OceaData,
-    OceaDataUpdateCoordinator,
-    OceaMeterReading,
+    OCEAData,
+    OCEADataUpdateCoordinator,
+    OCEAMeterReading,
 )
-from custom_components.ocea_smart_building.ocea import OceaMeter
+from custom_components.ocea_smart_building.ocea import OCEAMeter
 
 
 def _sensor(
     hass: HomeAssistant,
     estimated_leak: Decimal | None,
-) -> OceaLeakBinarySensor:
+) -> OCEALeakBinarySensor:
     """Create a leak sensor with one meter reading."""
     entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local-123"})
     entry.add_to_hass(hass)
-    coordinator = OceaDataUpdateCoordinator(hass, Mock(), entry)
-    meter = OceaMeter.from_api(
+    coordinator = OCEADataUpdateCoordinator(hass, Mock(), entry)
+    meter = OCEAMeter.from_api(
         {"id": "pds-cold-1", "fluide": "EauFroide"},
         {"pdsId": "pds-cold-1", "numeroSerie": "SERIAL-1"},
     )
-    coordinator.data = OceaData(
+    coordinator.data = OCEAData(
         totals={},
         meters={
-            meter.identifier: OceaMeterReading(
+            meter.identifier: OCEAMeterReading(
                 meter=meter,
                 value=Decimal(1),
                 latest_date=date(2026, 9, 15),
@@ -43,7 +43,7 @@ def _sensor(
             )
         },
     )
-    return OceaLeakBinarySensor(coordinator, "local-123", meter)
+    return OCEALeakBinarySensor(coordinator, "local-123", meter)
 
 
 async def test_leak_binary_sensor_is_on_for_positive_estimate(

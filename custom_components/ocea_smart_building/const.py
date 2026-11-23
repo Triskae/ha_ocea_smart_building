@@ -1,4 +1,4 @@
-"""Constants for the Ocea Smart Building integration."""
+"""Constants for the OCEA Smart Building integration."""
 
 from dataclasses import dataclass
 
@@ -12,7 +12,7 @@ UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/145.0.0.0 Safari/537.36 "
-    f"Home-Assistant-Ocea-Smart-Building/{INTEGRATION_VERSION}"
+    f"Home-Assistant-OCEA-Smart-Building/{INTEGRATION_VERSION}"
 )
 
 # Config keys
@@ -27,7 +27,7 @@ DEFAULT_SCAN_INTERVAL = 18000  # 5 hours
 
 @dataclass(frozen=True, slots=True)
 class PdsFluidMetadata:
-    """Configuration derived from one supported Ocea fluid code."""
+    """Configuration derived from one supported OCEA fluid code."""
 
     api_unit: str
     dashboard_sensor_key: str

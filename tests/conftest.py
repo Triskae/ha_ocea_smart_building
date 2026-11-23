@@ -1,4 +1,4 @@
-"""Pytest configuration for Ocea Smart Building tests."""
+"""Pytest configuration for OCEA Smart Building tests."""
 
 from collections.abc import AsyncIterator
 from unittest.mock import patch

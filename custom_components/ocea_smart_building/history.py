@@ -1,4 +1,4 @@
-"""Synchronize dated Ocea consumption as external statistics."""
+"""Synchronize dated OCEA consumption as external statistics."""
 
 from __future__ import annotations
 
@@ -33,14 +33,14 @@ from .const import (
     PDS_FLUID_METADATA,
 )
 from .coordinator import (
-    OceaDailyConsumption,
-    OceaDataUpdateCoordinator,
-    OceaMeterReading,
+    OCEADailyConsumption,
+    OCEADataUpdateCoordinator,
+    OCEAMeterReading,
     daily_consumptions_from_series,
 )
-from .ocea import OceaApiClient, OceaApiError, OceaAuthError, OceaMeter, OceaResident
+from .ocea import OCEAApiClient, OCEAApiError, OCEAAuthError, OCEAMeter, OCEAResident
 from .ocea.const import OCEA_TIME_ZONE
-from .ocea.models import OceaConsumptionRequest, OceaConsumptionSeries
+from .ocea.models import OCEAConsumptionRequest, OCEAConsumptionSeries
 
 _LOGGER = logging.getLogger(__name__)
 _CHUNK_DAYS: Final = 90
@@ -77,19 +77,19 @@ class MeterHistory:
 
 
 def _api_date(value: object) -> date:
-    """Parse an Ocea calendar date without exposing the source value."""
+    """Parse an OCEA calendar date without exposing the source value."""
     if not isinstance(value, str):
-        raise OceaApiError("Missing or invalid Ocea date")
+        raise OCEAApiError("Missing or invalid OCEA date")
     try:
         if len(value) == 10:
             return date.fromisoformat(value)
         return datetime.fromisoformat(value).date()
     except ValueError as err:
-        raise OceaApiError("Missing or invalid Ocea date") from err
+        raise OCEAApiError("Missing or invalid OCEA date") from err
 
 
 def _occupation_start(
-    resident: OceaResident, local_id: str, today: date
+    resident: OCEAResident, local_id: str, today: date
 ) -> date:
     """Find the unique current occupation for the configured dwelling."""
     matching: list[date] = []
@@ -106,17 +106,17 @@ def _occupation_start(
             if start <= today and (end is None or end >= today):
                 matching.append(start)
     if len(matching) != 1:
-        raise OceaApiError("No unique active Ocea occupation for the dwelling")
+        raise OCEAApiError("No unique active OCEA occupation for the dwelling")
     return matching[0]
 
 
-def _history_start(occupation_start: date, meter: OceaMeter) -> date:
+def _history_start(occupation_start: date, meter: OCEAMeter) -> date:
     """Bound a meter's history by both occupation and device installation."""
     return max(occupation_start, _api_date(meter.installation_date))
 
 
 def _dwelling_history_start(
-    occupation_start: date, fluid: str, readings: Iterable[OceaMeterReading]
+    occupation_start: date, fluid: str, readings: Iterable[OCEAMeterReading]
 ) -> date:
     """Bound dwelling history by the earliest known installation for the fluid."""
     dates: list[date] = []
@@ -128,19 +128,19 @@ def _dwelling_history_start(
         matched = True
         try:
             dates.append(_api_date(reading.meter.installation_date))
-        except OceaApiError:
+        except OCEAApiError:
             invalid = True
     if not matched:
-        _LOGGER.warning("No meter found for one Ocea dwelling fluid; using occupation start")
+        _LOGGER.warning("No meter found for one OCEA dwelling fluid; using occupation start")
     elif invalid:
         if dates:
             _LOGGER.warning(
-                "Missing or invalid meter installation date for one Ocea dwelling fluid; "
+                "Missing or invalid meter installation date for one OCEA dwelling fluid; "
                 "using the earliest valid date"
             )
         else:
             _LOGGER.warning(
-                "No valid meter installation date for one Ocea dwelling fluid; "
+                "No valid meter installation date for one OCEA dwelling fluid; "
                 "using occupation start"
             )
     if not dates:
@@ -150,15 +150,15 @@ def _dwelling_history_start(
 
 def _history_id(
     local_id: str,
-    meter: OceaMeter,
+    meter: OCEAMeter,
 ) -> str:
     """Build a stable cache key from the dwelling, measurement point and fluid."""
     identity = f"{local_id}\0{meter.identifier}\0{meter.pds.fluid}"
     return sha256(identity.encode()).hexdigest()
 
 
-def _meter_statistic_id(local_id: str, meter: OceaMeter) -> str:
-    """Return a stable Recorder ID without exposing Ocea identifiers."""
+def _meter_statistic_id(local_id: str, meter: OCEAMeter) -> str:
+    """Return a stable Recorder ID without exposing OCEA identifiers."""
     key = _history_id(local_id, meter)
     return f"{DOMAIN}:{PDS_FLUID_METADATA[meter.pds.fluid].statistic_id_prefix}_{key}"
 
@@ -174,7 +174,7 @@ def _dwelling_statistic_id(local_id: str, fluid: str) -> str:
     return f"{DOMAIN}:{prefix}_{_dwelling_history_id(local_id, fluid)}"
 
 
-def _meter_metadata(local_id: str, meter: OceaMeter) -> StatisticMetaData:
+def _meter_metadata(local_id: str, meter: OCEAMeter) -> StatisticMetaData:
     """Build Recorder metadata for an existing PDS series."""
     fluid_metadata = PDS_FLUID_METADATA[meter.pds.fluid]
     serial_number = meter.serial_number or _history_id(local_id, meter)[:8]
@@ -206,45 +206,45 @@ def _dwelling_metadata(local_id: str, fluid: str) -> StatisticMetaData:
 def _decimal_value(value: object) -> Decimal:
     """Validate a non-negative, finite consumption value."""
     if not isinstance(value, (str, int, float)) or isinstance(value, bool):
-        raise OceaApiError("Invalid daily consumption value")
+        raise OCEAApiError("Invalid daily consumption value")
     try:
         result = Decimal(str(value).replace(",", "."))
     except InvalidOperation as err:
-        raise OceaApiError("Invalid daily consumption value") from err
+        raise OCEAApiError("Invalid daily consumption value") from err
     if not result.is_finite() or result < 0:
-        raise OceaApiError("Invalid daily consumption value")
+        raise OCEAApiError("Invalid daily consumption value")
     return result
 
 
 def _parse_daily_response(
-    response: OceaConsumptionSeries, expected_unit: str
-) -> tuple[OceaDailyConsumption, ...]:
+    response: OCEAConsumptionSeries, expected_unit: str
+) -> tuple[OCEADailyConsumption, ...]:
     """Validate a daily response without assuming missing values are zero."""
     if response.unit != expected_unit:
-        raise OceaApiError("Unsupported daily consumption unit")
+        raise OCEAApiError("Unsupported daily consumption unit")
     items = daily_consumptions_from_series(response)
     if items is None:
-        raise OceaApiError("Invalid daily consumption list")
-    readings: list[OceaDailyConsumption] = []
+        raise OCEAApiError("Invalid daily consumption list")
+    readings: list[OCEADailyConsumption] = []
     seen: set[date] = set()
     for item in items:
         if item.consent is False:
-            raise OceaApiError("Ocea does not provide consent for daily consumption")
+            raise OCEAApiError("OCEA does not provide consent for daily consumption")
         if item.day in seen:
-            raise OceaApiError("Duplicate daily consumption date")
+            raise OCEAApiError("Duplicate daily consumption date")
         if not item.value.is_finite() or item.value < 0:
-            raise OceaApiError("Invalid daily consumption value")
+            raise OCEAApiError("Invalid daily consumption value")
         seen.add(item.day)
         readings.append(item)
     return tuple(readings)
 
 
 def _current_daily_readings(
-    reading: OceaMeterReading, expected_unit: str, today: date
-) -> tuple[OceaDailyConsumption, ...]:
+    reading: OCEAMeterReading, expected_unit: str, today: date
+) -> tuple[OCEADailyConsumption, ...]:
     """Validate coordinator readings before reusing them for history."""
     if reading.unit != expected_unit or reading.daily_consumptions is None:
-        raise OceaApiError("Invalid current daily consumption unit or readings")
+        raise OCEAApiError("Invalid current daily consumption unit or readings")
     seen: set[date] = set()
     for item in reading.daily_consumptions:
         if (
@@ -254,7 +254,7 @@ def _current_daily_readings(
             or not item.value.is_finite()
             or item.value < 0
         ):
-            raise OceaApiError("Invalid current daily consumption")
+            raise OCEAApiError("Invalid current daily consumption")
         seen.add(item.day)
     return reading.daily_consumptions
 
@@ -266,11 +266,11 @@ def _load_histories(data: dict[str, object] | None) -> tuple[str, dict[str, Mete
     generation = data.get("generation")
     meters = data.get("meters")
     if not isinstance(generation, str) or not generation or not isinstance(meters, dict):
-        raise OceaApiError("Invalid persisted consumption history")
+        raise OCEAApiError("Invalid persisted consumption history")
     histories: dict[str, MeterHistory] = {}
     for key, raw in meters.items():
         if not isinstance(key, str) or not isinstance(raw, dict):
-            raise OceaApiError("Invalid persisted consumption history")
+            raise OCEAApiError("Invalid persisted consumption history")
         start = _api_date(raw.get("start"))
         cursor = _api_date(raw.get("cursor"))
         raw_next_request = raw.get("next_request")
@@ -286,18 +286,18 @@ def _load_histories(data: dict[str, object] | None) -> tuple[str, dict[str, Mete
             _api_date(raw["request_floor"]) if raw.get("request_floor") is not None else None
         )
         if not isinstance(retry_count, int) or isinstance(retry_count, bool):
-            raise OceaApiError("Invalid persisted consumption history")
+            raise OCEAApiError("Invalid persisted consumption history")
         if not isinstance(chunk_days, int) or isinstance(chunk_days, bool) or not 1 <= chunk_days <= _CHUNK_DAYS:
-            raise OceaApiError("Invalid persisted consumption history")
+            raise OCEAApiError("Invalid persisted consumption history")
         if raw_next_request is not None and "retry_count" in raw:
             if not isinstance(raw_next_request, str):
-                raise OceaApiError("Invalid persisted consumption history")
+                raise OCEAApiError("Invalid persisted consumption history")
             try:
                 next_request = datetime.fromisoformat(raw_next_request)
             except ValueError as err:
-                raise OceaApiError("Invalid persisted consumption history") from err
+                raise OCEAApiError("Invalid persisted consumption history") from err
             if next_request.utcoffset() is None:
-                raise OceaApiError("Invalid persisted consumption history")
+                raise OCEAApiError("Invalid persisted consumption history")
         recheck_cursor = _api_date(raw.get("recheck_cursor", raw.get("start")))
         raw_days = raw.get("days")
         if (
@@ -306,12 +306,12 @@ def _load_histories(data: dict[str, object] | None) -> tuple[str, dict[str, Mete
             or (request_floor is not None and request_floor < start)
             or not isinstance(raw_days, dict)
         ):
-            raise OceaApiError("Invalid persisted consumption history")
+            raise OCEAApiError("Invalid persisted consumption history")
         days: dict[date, Decimal] = {}
         for day, value in raw_days.items():
             parsed_day = _api_date(day)
             if parsed_day < start:
-                raise OceaApiError("Invalid persisted consumption history")
+                raise OCEAApiError("Invalid persisted consumption history")
             days[parsed_day] = _decimal_value(value)
         histories[key] = MeterHistory(
             start,
@@ -392,15 +392,15 @@ def _daily_statistics(
     return result
 
 
-class OceaHistoryManager:
+class OCEAHistoryManager:
     """Backfill and update external statistics for meters and dwelling fluids."""
 
     def __init__(
         self,
         hass: HomeAssistant,
         entry: ConfigEntry,
-        client: OceaApiClient,
-        coordinator: OceaDataUpdateCoordinator,
+        client: OCEAApiClient,
+        coordinator: OCEADataUpdateCoordinator,
     ) -> None:
         self.hass = hass
         self.entry = entry
@@ -456,14 +456,14 @@ class OceaHistoryManager:
             elif local_start.hour == 23 and local_start.date() <= today:
                 try:
                     days[local_start.date()] = _decimal_value(state)
-                except OceaApiError:
-                    _LOGGER.warning("Ignoring one invalid restored Ocea statistic value")
+                except OCEAApiError:
+                    _LOGGER.warning("Ignoring one invalid restored OCEA statistic value")
                     continue
                 history_start = min(history_start, local_start.date())
 
         if not days:
             return None
-        _LOGGER.debug("Restored %d Ocea daily readings from Recorder", len(days))
+        _LOGGER.debug("Restored %d OCEA daily readings from Recorder", len(days))
         return MeterHistory(
             history_start,
             start,
@@ -477,7 +477,7 @@ class OceaHistoryManager:
         if self._task is not None and not self._task.done():
             return
         self._task = self.entry.async_create_background_task(
-            self.hass, self._async_run(), "Ocea consumption history"
+            self.hass, self._async_run(), "OCEA consumption history"
         )
 
     async def _async_run(self) -> None:
@@ -546,9 +546,9 @@ class OceaHistoryManager:
                     self._generation, self._histories = _load_histories(
                         await self.store.async_load()
                     )
-                except OceaApiError as err:
+                except OCEAApiError as err:
                     _LOGGER.warning(
-                        "Invalid cached Ocea history; rebuilding from the API: %s", err
+                        "Invalid cached OCEA history; rebuilding from the API: %s", err
                     )
                     self._generation = uuid4().hex
                     self._histories = {}
@@ -575,19 +575,19 @@ class OceaHistoryManager:
                 self._dwelling_fluids = dwelling_fluids
                 self._discovery_checked_at = now
             if self._occupation_start is None or self._dwelling_fluids is None:
-                raise OceaApiError("Ocea history discovery is unavailable")
+                raise OCEAApiError("OCEA history discovery is unavailable")
             occupation_start = self._occupation_start
             dwelling_fluids = self._dwelling_fluids
             today = local_now.date() - timedelta(days=1)
             self._global_retry_count = 0
             self._global_next_request = None
-        except OceaApiError as err:
+        except OCEAApiError as err:
             self._set_global_retry(now)
-            _LOGGER.warning("Unable to synchronize Ocea consumption history: %s", err)
+            _LOGGER.warning("Unable to synchronize OCEA consumption history: %s", err)
             return
-        except (OceaAuthError, ClientError, TimeoutError, OSError):
+        except (OCEAAuthError, ClientError, TimeoutError, OSError):
             self._set_global_retry(now)
-            _LOGGER.warning("Unable to synchronize Ocea consumption history")
+            _LOGGER.warning("Unable to synchronize OCEA consumption history")
             return
 
         unsupported_count = len(set(dwelling_fluids) - PDS_FLUID_METADATA.keys())
@@ -624,7 +624,7 @@ class OceaHistoryManager:
             try:
                 async with self._request_semaphore:
                     await sync()
-            except (OceaAuthError, OceaApiError, ClientError, TimeoutError, OSError) as err:
+            except (OCEAAuthError, OCEAApiError, ClientError, TimeoutError, OSError) as err:
                 return kind, series_item, err
             return kind, series_item, None
 
@@ -635,19 +635,19 @@ class OceaHistoryManager:
         for kind, _, error in results:
             if error is None:
                 continue
-            if isinstance(error, OceaAuthError):
+            if isinstance(error, OCEAAuthError):
                 authentication_failed = True
-                _LOGGER.warning("Unable to authenticate while synchronizing Ocea history")
-            elif isinstance(error, OceaApiError):
-                _LOGGER.warning("Unable to synchronize one Ocea %s history: %s", kind, error)
+                _LOGGER.warning("Unable to authenticate while synchronizing OCEA history")
+            elif isinstance(error, OCEAApiError):
+                _LOGGER.warning("Unable to synchronize one OCEA %s history: %s", kind, error)
             else:
-                _LOGGER.warning("Unable to synchronize one Ocea %s history", kind)
+                _LOGGER.warning("Unable to synchronize one OCEA %s history", kind)
         if authentication_failed:
             self._set_global_retry(now)
             return
 
     async def _async_sync_meter(
-        self, reading: OceaMeterReading, occupation_start: date, today: date, now: datetime
+        self, reading: OCEAMeterReading, occupation_start: date, today: date, now: datetime
     ) -> None:
         """Synchronize one meter."""
         await self._async_sync_series(
@@ -660,19 +660,19 @@ class OceaHistoryManager:
         occupation_start: date,
         today: date,
         now: datetime,
-        reading: OceaMeterReading | None,
+        reading: OCEAMeterReading | None,
     ) -> None:
         """Update one series and publish recalculated cumulative sums."""
         assert self._histories is not None
         assert self._generation is not None
         fluid_metadata = PDS_FLUID_METADATA.get(fluid)
         if fluid_metadata is None:
-            raise OceaApiError("Unsupported consumption fluid")
+            raise OCEAApiError("Unsupported consumption fluid")
         expected_unit = fluid_metadata.api_unit
         meter = reading.meter if reading is not None else None
         start = _history_start(occupation_start, meter) if meter else occupation_start
         if start > today + timedelta(days=1):
-            raise OceaApiError("Ocea consumption history begins in the future")
+            raise OCEAApiError("OCEA consumption history begins in the future")
         key = (
             _history_id(self.local_id, meter)
             if meter else _dwelling_history_id(self.local_id, fluid)
@@ -717,8 +717,8 @@ class OceaHistoryManager:
                 current_items = _current_daily_readings(
                     reading, expected_unit, today + timedelta(days=1)
                 )
-            except OceaApiError:
-                _LOGGER.warning("Unable to use current daily readings for one Ocea meter")
+            except OCEAApiError:
+                _LOGGER.warning("Unable to use current daily readings for one OCEA meter")
 
         older_recheck = False
         if history.cursor <= today:
@@ -774,7 +774,7 @@ class OceaHistoryManager:
                     )
                 else:
                     while True:
-                        payload: OceaConsumptionRequest = {
+                        payload: OCEAConsumptionRequest = {
                             "debut": f"{request_start.isoformat()}T00:00:00.000Z",
                             "fin": f"{end.isoformat()}T23:59:59.999Z",
                             "granularity": "Day",
@@ -789,7 +789,7 @@ class OceaHistoryManager:
                                     self.local_id, fluid, payload
                                 )
                             items = _parse_daily_response(response, expected_unit)
-                        except OceaApiError as err:
+                        except OCEAApiError as err:
                             if err.status != 413 or request_start >= end:
                                 raise
                             range_days = (end - request_start).days + 1
@@ -805,7 +805,7 @@ class OceaHistoryManager:
                             continue
                         break
                 if any(not request_start <= item.day <= end for item in items):
-                    raise OceaApiError(
+                    raise OCEAApiError(
                         "Daily consumption lies outside the requested period"
                     )
                 for item in items:
@@ -823,12 +823,12 @@ class OceaHistoryManager:
                     history.last_old_recheck = today
                 history.retry_count = 0
                 history.next_request = None
-            except OceaApiError as err:
+            except OCEAApiError as err:
                 self._set_retry(history, now)
-                _LOGGER.warning("Unable to retrieve one Ocea history period: %s", err)
+                _LOGGER.warning("Unable to retrieve one OCEA history period: %s", err)
             except (ClientError, TimeoutError, OSError):
                 self._set_retry(history, now)
-                _LOGGER.warning("Unable to retrieve one Ocea history period")
+                _LOGGER.warning("Unable to retrieve one OCEA history period")
 
         if key not in self._histories or history != previous:
             async with self._store_lock:
@@ -877,4 +877,4 @@ class OceaHistoryManager:
         self._global_next_request = now + timedelta(seconds=delay)
 
 
-OceaHistorySynchronizer = OceaHistoryManager
+OCEAHistorySynchronizer = OCEAHistoryManager
