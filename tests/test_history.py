@@ -97,6 +97,212 @@ def _meter(
     )
 
 
+@pytest.mark.parametrize(
+    ("global_delay", "backfill_delay", "expected_delay"),
+    [(None, 0, 60), (None, 180, 180), (300, 0, 300)],
+)
+async def test_history_worker_recovers_after_unexpected_error(
+    hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
+    global_delay: int | None,
+    backfill_delay: int,
+    expected_delay: int,
+) -> None:
+    """Wait for the appropriate retry delay before resuming after an error."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local"})
+    client = AsyncMock(spec=OCEAApiClient)
+    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    synchronizer = OCEAHistorySynchronizer(
+        hass, entry, client, coordinator, entry.data[CONF_LOCAL_ID], entry.entry_id
+    )
+    now = datetime(2024, 2, 1, tzinfo=UTC)
+    if global_delay is not None:
+        synchronizer._global_next_request = now + timedelta(seconds=global_delay)
+    waiting = asyncio.Event()
+    release = asyncio.Event()
+    resumed = asyncio.Event()
+
+    async def sync() -> None:
+        if not waiting.is_set():
+            raise RuntimeError("sensitive-placeholder")
+        resumed.set()
+
+    async def sleep(delay: float) -> None:
+        if not waiting.is_set():
+            waiting.set()
+            await release.wait()
+            return
+        await asyncio.Event().wait()
+
+    with (
+        patch.object(synchronizer, "_async_sync", side_effect=sync) as sync_mock,
+        patch.object(synchronizer, "_backfill_delay", return_value=backfill_delay),
+        patch("custom_components.ocea_smart_building.history.dt_util.utcnow", return_value=now),
+        patch("custom_components.ocea_smart_building.history.asyncio.sleep", side_effect=sleep)
+        as sleep_mock,
+    ):
+        task = asyncio.create_task(synchronizer._async_run())
+        try:
+            await asyncio.wait_for(waiting.wait(), timeout=1)
+            assert sync_mock.await_count == 1
+            sleep_mock.assert_awaited_once_with(expected_delay)
+            assert "Unexpected error synchronizing OCEA consumption history" in caplog.text
+            assert "RuntimeError" in caplog.text
+            assert "sensitive-placeholder" not in caplog.text
+            release.set()
+            await asyncio.wait_for(resumed.wait(), timeout=1)
+            assert sync_mock.await_count == 2
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_history_worker_cancellation_during_sync(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Cancellation during synchronization propagates without an error log."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local"})
+    client = AsyncMock(spec=OCEAApiClient)
+    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    synchronizer = OCEAHistorySynchronizer(
+        hass, entry, client, coordinator, entry.data[CONF_LOCAL_ID], entry.entry_id
+    )
+    started = asyncio.Event()
+
+    async def sync() -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    with patch.object(synchronizer, "_async_sync", side_effect=sync):
+        task = asyncio.create_task(synchronizer._async_run())
+        try:
+            await asyncio.wait_for(started.wait(), timeout=1)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+    assert "Unexpected error synchronizing OCEA consumption history" not in caplog.text
+
+
+async def test_history_worker_cancels_other_series_after_unexpected_error(
+    hass: HomeAssistant,
+) -> None:
+    """Keep concurrent series attached to the worker until they finish or are cancelled."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local"})
+    client = AsyncMock(spec=OCEAApiClient)
+    client.get_resident.return_value = OCEAResident.from_api({
+        "occupations": [{
+            "logementId": "local", "dateDebut": "2024-01-01T00:00:00Z", "dateFin": None
+        }]
+    })
+    client.get_dwelling_fluids.return_value = []
+    meters = [_meter(pds_id=f"pds-{index}") for index in range(2)]
+    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator.async_set_updated_data(OCEAData(
+        totals={},
+        meters={
+            meter.identifier: OCEAMeterReading(meter=meter, value=None, latest_date=None)
+            for meter in meters
+        },
+    ))
+    synchronizer = OCEAHistorySynchronizer(
+        hass, entry, client, coordinator, entry.data[CONF_LOCAL_ID], entry.entry_id
+    )
+    second_started = asyncio.Event()
+    first_failed = asyncio.Event()
+    second_finished = asyncio.Event()
+    release = asyncio.Event()
+
+    async def sync_meter(
+        reading: OCEAMeterReading, occupation_start: date, today: date, now: datetime
+    ) -> None:
+        if reading.meter.identifier == meters[0].identifier:
+            await second_started.wait()
+            first_failed.set()
+            raise RuntimeError("sensitive-placeholder")
+        second_started.set()
+        try:
+            await release.wait()
+        finally:
+            second_finished.set()
+
+    with patch.object(synchronizer, "_async_sync_meter", side_effect=sync_meter):
+        task = asyncio.create_task(synchronizer._async_run())
+        try:
+            await asyncio.wait_for(first_failed.wait(), timeout=1)
+            for _ in range(3):
+                await asyncio.sleep(0)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert second_finished.is_set()
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_history_worker_recovers_after_scheduling_error(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unexpected scheduling error also waits before the next iteration."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local"})
+    client = AsyncMock(spec=OCEAApiClient)
+    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    synchronizer = OCEAHistorySynchronizer(
+        hass, entry, client, coordinator, entry.data[CONF_LOCAL_ID], entry.entry_id
+    )
+    waiting = asyncio.Event()
+    release = asyncio.Event()
+    resumed = asyncio.Event()
+
+    async def sync() -> None:
+        if waiting.is_set():
+            resumed.set()
+
+    async def sleep(delay: float) -> None:
+        if not waiting.is_set():
+            waiting.set()
+            await release.wait()
+            return
+        await asyncio.Event().wait()
+
+    with (
+        patch.object(synchronizer, "_async_sync", side_effect=sync) as sync_mock,
+        patch.object(
+            synchronizer, "_backfill_delay", side_effect=[RuntimeError("sensitive-placeholder"), 0]
+        ),
+        patch("custom_components.ocea_smart_building.history.asyncio.sleep", side_effect=sleep)
+        as sleep_mock,
+    ):
+        task = asyncio.create_task(synchronizer._async_run())
+        try:
+            await asyncio.wait_for(waiting.wait(), timeout=1)
+            assert sync_mock.await_count == 1
+            sleep_mock.assert_awaited_once_with(60)
+            assert "Unable to schedule OCEA consumption history synchronization" in caplog.text
+            assert "RuntimeError" in caplog.text
+            assert "sensitive-placeholder" not in caplog.text
+            release.set()
+            await asyncio.wait_for(resumed.wait(), timeout=1)
+            assert sync_mock.await_count == 2
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+
 def test_occupation_and_meter_dates_are_distinct() -> None:
     resident = OCEAResident.from_api({
         "occupations": [

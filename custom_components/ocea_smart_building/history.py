@@ -484,16 +484,35 @@ class OCEAHistoryManager:
     async def _async_run(self) -> None:
         """Run backfill continuously, then synchronize once per day."""
         while True:
-            await self._async_sync()
-            now = dt_util.utcnow()
-            if self._global_next_request is not None and self._global_next_request > now:
-                delay = (self._global_next_request - now).total_seconds()
-            elif (retry_delay := self._backfill_delay()) is not None:
-                delay = retry_delay
-            elif self._has_pending_backfill():
-                delay = 0
-            else:
-                delay = _DAILY_SYNC_INTERVAL.total_seconds()
+            failed = False
+            try:
+                await self._async_sync()
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.error(
+                    "Unexpected error synchronizing OCEA consumption history (%s)",
+                    type(err).__name__,
+                )
+                failed = True
+
+            try:
+                now = dt_util.utcnow()
+                if self._global_next_request is not None and self._global_next_request > now:
+                    delay = (self._global_next_request - now).total_seconds()
+                elif (retry_delay := self._backfill_delay()) is not None:
+                    delay = retry_delay
+                elif self._has_pending_backfill():
+                    delay = 0
+                else:
+                    delay = _DAILY_SYNC_INTERVAL.total_seconds()
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.error(
+                    "Unable to schedule OCEA consumption history synchronization (%s)",
+                    type(err).__name__,
+                )
+                delay = _RETRY_BASE_SECONDS
+
+            if failed:
+                delay = max(delay, _RETRY_BASE_SECONDS)
             await asyncio.sleep(delay)
 
     def _has_pending_backfill(self) -> bool:
@@ -625,7 +644,8 @@ class OCEAHistoryManager:
             try:
                 async with self._request_semaphore:
                     await sync()
-            except (OCEAAuthError, OCEAApiError, ClientError, TimeoutError, OSError) as err:
+            except Exception as err:  # noqa: BLE001
+                # Wait for the other series before propagating unexpected errors.
                 return kind, series_item, err
             return kind, series_item, None
 
@@ -641,8 +661,10 @@ class OCEAHistoryManager:
                 _LOGGER.warning("Unable to authenticate while synchronizing OCEA history")
             elif isinstance(error, OCEAApiError):
                 _LOGGER.warning("Unable to synchronize one OCEA %s history: %s", kind, error)
-            else:
+            elif isinstance(error, (ClientError, TimeoutError, OSError)):
                 _LOGGER.warning("Unable to synchronize one OCEA %s history", kind)
+            else:
+                raise error
         if authentication_failed:
             self._set_global_retry(now)
             return

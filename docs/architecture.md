@@ -80,7 +80,7 @@ C4Component
   Rel(coordinator, entities, "Publishes normalized coordinator data")
   Rel(entrySetup, history, "Starts and scopes")
   Rel(history, coordinator, "Reads current validated readings without scheduling from refreshes")
-  Rel(history, apiClient, "Fetches dated PDS readings")
+  Rel(history, apiClient, "Fetches dated PDS and dwelling readings")
   Rel(history, homeAssistant, "Imports external Recorder statistics")
 ```
 
@@ -190,9 +190,18 @@ can be updated and are not reset by cache reconstruction.
 The history manager is an entry-scoped background service, separate from the
 five-hour data coordinator. It backfills in inclusive periods of up to 90 days,
 reducing the persisted per-series range after an HTTP 413 response. Concurrent
-history requests are capped at three per entry. Network, rate-limit, server,
-and other API failures leave the cursor in place and use a persisted exponential
-retry delay; a failed series does not block the others.
+history requests are capped at three per entry. API and network errors during
+history requests leave the series cursor in place and use a persisted
+exponential retry delay. Authentication failures and failures during resident
+or fluid discovery use a global exponential retry delay held in memory. A
+failed series does not block the others.
+
+Unexpected synchronization errors are logged by exception type without their
+details. If a series fails unexpectedly, the worker waits for the other
+concurrent series to finish. It retries synchronization after at least 60
+seconds, respecting longer scheduled delays. An unexpected scheduling error
+also results in a 60-second delay. Cancellation still propagates when the
+entry is unloaded.
 
 The manager requests history only through the last completed day in its
 `Europe/Paris` calendar.
