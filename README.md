@@ -232,14 +232,15 @@ replacement device using the same PDS therefore continues that PDS series; a
 different PDS creates a different series. Dwelling series have separate stable
 identifiers derived from the dwelling and fluid. Statistic display names include
 the dwelling identifier, which is visible in Home Assistant and stored in
-Recorder metadata. Existing PDS statistic identifiers and history are retained.
+Recorder metadata.
 
 Backfill progress and readings are cached privately in Home Assistant. If the
-cache is missing or invalid, history is reconstructed under the same statistic
-ID; existing Recorder statistics are neither reset nor deleted. Removing an
-entry deletes its cache but leaves Recorder statistics intact. Changing the
-occupation or meter installation date can change which dates OCEA is asked for,
-but does not change the PDS statistic ID.
+cache is missing or invalid, the integration can rebuild history under the same
+statistic ID using Recorder and available OCEA data; existing Recorder
+statistics are neither reset nor deleted. Removing an entry deletes its cache
+but leaves Recorder statistics intact. Changing the occupation or meter
+installation date can change which dates OCEA is asked for, but does not change
+the PDS statistic ID.
 
 Home Assistant does not support a fixed or entity price for an external water
 statistic; this integration does not provide a separate cost statistic.

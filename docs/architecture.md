@@ -164,13 +164,15 @@ reported as “no leak.”
 Current-month requests and historical timestamps use `Europe/Paris` as the
 integration's calendar convention, independent of Home Assistant's configured
 timezone. The actual timezone of OCEA's daily aggregation is not established.
-Each external statistic ID is derived from the configured dwelling ID, PDS ID and
-exact supported fluid code. It does not depend on the config-entry ID, cache
-generation, history start date, device serial number or timezone. The private
-Store holds progress and daily values, not the statistic identity. Dwelling
-water and CETC series use separate stable IDs derived from the dwelling ID and fluid,
-and their history requests start at the later of the active occupation and the
-earliest valid installation date among the discovered meters of that fluid.
+For a PDS, the identity key hashes the dwelling ID and PDS ID; for a dwelling,
+it hashes the dwelling ID alone. Each external statistic ID combines that key
+with the supported fluid's `fluid_key` and a `consumption` suffix. The IDs do
+not depend on the config-entry ID, cache generation, history start date, device
+serial number or timezone. The private Store uses the config-entry ID in its
+storage key and indexes each series' progress and daily values by its full
+statistic ID. Dwelling water and CETC history requests start at the later of
+the active occupation and the earliest valid installation date among the
+discovered meters of that fluid.
 The coordinator retains one selected device per PDS, so other devices returned
 for the same PDS are not considered. Missing or invalid installation dates are
 warned about; with partially valid dates the minimum of those dates is used, which
@@ -179,10 +181,11 @@ meter is available, requests fall back to the occupation start with a warning.
 Meter discovery remains cached until the integration is reloaded. If a request
 bound changes, stored values are retained while dwelling and PDS requests respect
 their current bounds, including after a selected meter is replaced. Display names
-include the dwelling ID. If the Store is absent or invalid, the manager can
-rebuild under the same ID;
-Recorder rows are updated at matching timestamps and are never reset by cache
-reconstruction.
+include the dwelling ID, the fluid label and `consumption`; PDS names also
+include the serial number or a fallback derived from the PDS identity key.
+If the Store is absent or invalid, the manager can rebuild under the current
+statistic ID using Recorder and OCEA data; Recorder rows at matching timestamps
+can be updated and are not reset by cache reconstruction.
 
 The history manager is an entry-scoped background service, separate from the
 five-hour data coordinator. It backfills in inclusive periods of up to 90 days,
