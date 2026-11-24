@@ -70,11 +70,11 @@ async def test_leak_binary_sensor_is_off_for_zero_estimate(
     assert sensor.available is True
 
 
-async def test_leak_binary_sensor_is_unavailable_without_estimate(
+async def test_leak_binary_sensor_is_unknown_without_estimate(
     hass: HomeAssistant,
 ) -> None:
     """Test a missing estimate does not falsely report no leak."""
     sensor = _sensor(hass, None)
 
     assert sensor.is_on is None
-    assert sensor.available is False
+    assert sensor.available is True

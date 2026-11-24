@@ -10,8 +10,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import CONF_LOCAL_ID, PDS_FLUID_METADATA
-from .coordinator import OCEAConfigEntry, OCEADataUpdateCoordinator, OCEAMeterReading
-from .entity import OCEAEntity, meter_device_info, meter_entity_unique_id
+from .coordinator import OCEAConfigEntry, OCEADataUpdateCoordinator
+from .entity import OCEAMeterEntity, meter_device_info, meter_entity_unique_id
 from .ocea import OCEAMeter
 
 PARALLEL_UPDATES = 0
@@ -34,7 +34,7 @@ async def async_setup_entry(
     )
 
 
-class OCEALeakBinarySensor(OCEAEntity, BinarySensorEntity):
+class OCEALeakBinarySensor(OCEAMeterEntity, BinarySensorEntity):
     """Represent whether OCEA estimates a leak for one water meter."""
 
     _attr_translation_key = "fuite"
@@ -47,25 +47,11 @@ class OCEALeakBinarySensor(OCEAEntity, BinarySensorEntity):
         meter: OCEAMeter,
     ) -> None:
         """Initialize a leak binary sensor."""
-        super().__init__(coordinator)
-        self._meter = meter
+        super().__init__(coordinator, meter)
         self._attr_unique_id = meter_entity_unique_id(
             local_id, meter, "fuite_detectee"
         )
         self._attr_device_info = meter_device_info(local_id, meter)
-
-    @property
-    def _reading(self) -> OCEAMeterReading | None:
-        """Return the current reading for this meter."""
-        if self.coordinator.data is None:
-            return None
-        return self.coordinator.data.meters.get(self._meter.identifier)
-
-    @property
-    def available(self) -> bool:
-        """Return whether a leak estimate is currently available."""
-        reading = self._reading
-        return super().available and reading is not None and reading.estimated_leak is not None
 
     @property
     def is_on(self) -> bool | None:

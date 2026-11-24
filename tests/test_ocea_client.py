@@ -152,7 +152,7 @@ async def test_second_unauthorized_response_does_not_retry(aiohttp_server, monke
         client = _client(session)
         client._auth._access_token = "old-placeholder"
         client._auth._refresh_token = "refresh-placeholder"
-        with pytest.raises(OCEAApiError, match="HTTP 401"):
+        with pytest.raises(OCEAAuthError, match="HTTP 401"):
             await client._api_request(method, "/api/test", {} if method == "POST" else None)
     assert len(state["requests"]) == 2
     assert len(state["token_forms"]) == 1

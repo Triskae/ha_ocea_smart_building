@@ -6,7 +6,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import OCEADataUpdateCoordinator
+from .coordinator import OCEADataUpdateCoordinator, OCEAMeterReading
 from .ocea import OCEAMeter
 
 
@@ -34,3 +34,25 @@ class OCEAEntity(CoordinatorEntity[OCEADataUpdateCoordinator]):
     """Base class for OCEA coordinator entities."""
 
     _attr_has_entity_name = True
+
+
+class OCEAMeterEntity(OCEAEntity):
+    """Base entity for a single meter."""
+
+    def __init__(self, coordinator: OCEADataUpdateCoordinator, meter: OCEAMeter) -> None:
+        """Associate the entity with its meter."""
+        super().__init__(coordinator)
+        self._meter = meter
+
+    @property
+    def _reading(self) -> OCEAMeterReading | None:
+        """Return the current reading for this meter."""
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.meters.get(self._meter.identifier)
+
+    @property
+    def available(self) -> bool:
+        """Return whether the meter's data could be fetched."""
+        reading = self._reading
+        return super().available and reading is not None and reading.fetch_succeeded

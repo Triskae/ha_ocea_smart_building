@@ -54,6 +54,7 @@ class OCEAMeterReading:
     consent: bool | None = None
     response_type: str | None = None
     daily_consumptions: tuple[OCEADailyConsumption, ...] | None = None
+    fetch_succeeded: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,6 +193,7 @@ class OCEADataUpdateCoordinator(DataUpdateCoordinator[OCEAData]):
         self.client = client
         self._local_id: str = config_entry.data[CONF_LOCAL_ID]
         self._meters: dict[str, OCEAMeter] = {}
+        self._unavailable_meters: set[str] = set()
 
     async def _async_setup(self) -> None:
         """Discover supported dwelling meters once, before the first refresh."""
@@ -238,7 +240,9 @@ class OCEADataUpdateCoordinator(DataUpdateCoordinator[OCEAData]):
     async def _fetch_readings(self, payload: OCEAConsumptionRequest) -> dict[str, OCEAMeterReading]:
         """Fetch current-month consumption for each meter."""
         readings = {
-            pds_id: OCEAMeterReading(meter=meter, value=None, latest_date=None)
+            pds_id: OCEAMeterReading(
+                meter=meter, value=None, latest_date=None, fetch_succeeded=False
+            )
             for pds_id, meter in self._meters.items()
         }
         for pds_id, meter in self._meters.items():
@@ -248,7 +252,17 @@ class OCEADataUpdateCoordinator(DataUpdateCoordinator[OCEAData]):
             except OCEAAuthError:
                 raise
             except (OCEAApiError, ClientError, TimeoutError):
-                _LOGGER.warning("Unable to update one OCEA meter")
+                continue
+        unavailable = {
+            pds_id for pds_id, reading in readings.items() if not reading.fetch_succeeded
+        }
+        newly_unavailable = unavailable - self._unavailable_meters
+        recovered = self._unavailable_meters - unavailable
+        if newly_unavailable:
+            _LOGGER.info("%d OCEA meter(s) became unavailable", len(newly_unavailable))
+        if recovered:
+            _LOGGER.info("%d OCEA meter(s) became available again", len(recovered))
+        self._unavailable_meters = unavailable
         return readings
 
     @staticmethod

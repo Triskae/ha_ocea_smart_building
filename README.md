@@ -86,9 +86,9 @@ needed.
 
 The integration also creates a `Fuite détectée` binary sensor for every
 individual water meter. It is `off` when OCEA reports an estimated leak of
-`0`, and `on` when the estimate is greater than `0`. If OCEA does not provide
-an estimate, the binary sensor is temporarily unavailable rather than being
-treated as `off`.
+`0`, and `on` when the estimate is greater than `0`. If OCEA responds without
+an estimate, the binary sensor is unknown rather than being treated as `off`.
+If the meter cannot be reached, its leak entities are unavailable.
 
 Use this binary sensor in automations, for example:
 
