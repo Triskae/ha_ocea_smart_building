@@ -31,7 +31,7 @@ class PdsFluidMetadata:
 
     api_unit: str
     dashboard_sensor_key: str
-    statistic_id_prefix: str
+    fluid_key: str
     statistic_display_label: str
     statistic_unit_class: str
     statistic_unit_of_measurement: str
@@ -44,7 +44,7 @@ PDS_FLUID_METADATA: dict[str, PdsFluidMetadata] = {
     "EauFroide": PdsFluidMetadata(
         api_unit="m3",
         dashboard_sensor_key="eau_froide",
-        statistic_id_prefix="cold_water",
+        fluid_key="cold_water",
         statistic_display_label="Cold water",
         statistic_unit_class=VolumeConverter.UNIT_CLASS,
         statistic_unit_of_measurement=UnitOfVolume.CUBIC_METERS,
@@ -53,7 +53,7 @@ PDS_FLUID_METADATA: dict[str, PdsFluidMetadata] = {
     "EauChaude": PdsFluidMetadata(
         api_unit="m3",
         dashboard_sensor_key="eau_chaude",
-        statistic_id_prefix="hot_water",
+        fluid_key="hot_water",
         statistic_display_label="Hot water",
         statistic_unit_class=VolumeConverter.UNIT_CLASS,
         statistic_unit_of_measurement=UnitOfVolume.CUBIC_METERS,
@@ -62,7 +62,7 @@ PDS_FLUID_METADATA: dict[str, PdsFluidMetadata] = {
     CETC_FLUID: PdsFluidMetadata(
         api_unit="kWh",
         dashboard_sensor_key="cetc",
-        statistic_id_prefix="heating_energy",
+        fluid_key="heating_energy",
         statistic_display_label="Heating energy",
         statistic_unit_class=EnergyConverter.UNIT_CLASS,
         statistic_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,

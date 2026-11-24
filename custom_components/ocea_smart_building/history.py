@@ -148,30 +148,29 @@ def _dwelling_history_start(
     return max(occupation_start, min(dates))
 
 
-def _history_id(
-    local_id: str,
-    meter: OCEAMeter,
-) -> str:
-    """Build a stable cache key from the dwelling, measurement point and fluid."""
-    identity = f"{local_id}\0{meter.identifier}\0{meter.pds.fluid}"
-    return sha256(identity.encode()).hexdigest()
+def _history_id(local_id: str, meter: OCEAMeter) -> str:
+    """Build a stable fluid-independent key from the dwelling and measurement point."""
+    return sha256(f"{local_id}\0{meter.identifier}".encode()).hexdigest()
+
+
+def _dwelling_history_id(local_id: str) -> str:
+    """Build a stable fluid-independent key for one dwelling."""
+    return sha256(local_id.encode()).hexdigest()
+
+
+def _statistic_id(key: str, fluid: str) -> str:
+    """Return a stable Recorder ID without exposing OCEA identifiers."""
+    return f"{DOMAIN}:{key}_{PDS_FLUID_METADATA[fluid].fluid_key}_consumption"
 
 
 def _meter_statistic_id(local_id: str, meter: OCEAMeter) -> str:
-    """Return a stable Recorder ID without exposing OCEA identifiers."""
-    key = _history_id(local_id, meter)
-    return f"{DOMAIN}:{PDS_FLUID_METADATA[meter.pds.fluid].statistic_id_prefix}_{key}"
-
-
-def _dwelling_history_id(local_id: str, fluid: str) -> str:
-    """Build a stable, separate cache key for one dwelling and fluid."""
-    return sha256(f"{local_id}\0{fluid}".encode()).hexdigest()
+    """Return the Recorder ID of a PDS consumption series."""
+    return _statistic_id(_history_id(local_id, meter), meter.pds.fluid)
 
 
 def _dwelling_statistic_id(local_id: str, fluid: str) -> str:
-    """Return a stable Recorder ID for a dwelling consumption series."""
-    prefix = PDS_FLUID_METADATA[fluid].statistic_id_prefix
-    return f"{DOMAIN}:{prefix}_{_dwelling_history_id(local_id, fluid)}"
+    """Return the Recorder ID of a dwelling consumption series."""
+    return _statistic_id(_dwelling_history_id(local_id), fluid)
 
 
 def _meter_metadata(local_id: str, meter: OCEAMeter) -> StatisticMetaData:
@@ -181,7 +180,10 @@ def _meter_metadata(local_id: str, meter: OCEAMeter) -> StatisticMetaData:
     return StatisticMetaData(
         mean_type=StatisticMeanType.NONE,
         has_sum=True,
-        name=f"OCEA - {local_id} - {fluid_metadata.statistic_display_label} - {serial_number}",
+        name=(
+            f"OCEA - {local_id} - {serial_number} - "
+            f"{fluid_metadata.statistic_display_label} consumption"
+        ),
         source=DOMAIN,
         statistic_id=_meter_statistic_id(local_id, meter),
         unit_class=fluid_metadata.statistic_unit_class,
@@ -195,7 +197,7 @@ def _dwelling_metadata(local_id: str, fluid: str) -> StatisticMetaData:
     return StatisticMetaData(
         mean_type=StatisticMeanType.NONE,
         has_sum=True,
-        name=f"OCEA - {local_id} - {fluid_metadata.statistic_display_label}",
+        name=f"OCEA - {local_id} - {fluid_metadata.statistic_display_label} consumption",
         source=DOMAIN,
         statistic_id=_dwelling_statistic_id(local_id, fluid),
         unit_class=fluid_metadata.statistic_unit_class,
@@ -673,15 +675,12 @@ class OCEAHistoryManager:
         start = _history_start(occupation_start, meter) if meter else occupation_start
         if start > today + timedelta(days=1):
             raise OCEAApiError("OCEA consumption history begins in the future")
-        key = (
-            _history_id(self.local_id, meter)
-            if meter else _dwelling_history_id(self.local_id, fluid)
-        )
-        self._active_series.add(key)
         metadata = (
             _meter_metadata(self.local_id, meter)
             if meter else _dwelling_metadata(self.local_id, fluid)
         )
+        key = metadata["statistic_id"]
+        self._active_series.add(key)
         previous = self._histories.get(key)
         if previous is None:
             previous = await self._async_restore_history(metadata["statistic_id"], start, today)
