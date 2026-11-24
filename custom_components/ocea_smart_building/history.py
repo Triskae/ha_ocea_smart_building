@@ -28,7 +28,6 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    CONF_LOCAL_ID,
     DOMAIN,
     PDS_FLUID_METADATA,
 )
@@ -54,11 +53,9 @@ _DAILY_SYNC_INTERVAL: Final = timedelta(days=1)
 _RESTORE_STATISTICS_LIMIT: Final = 100_000
 
 
-def history_store(hass: HomeAssistant, entry: ConfigEntry) -> Store[dict[str, object]]:
-    """Create the private store for an entry's historical readings."""
-    return Store(
-        hass, 1, f"{DOMAIN}_history.{entry.entry_id}", private=True, atomic_writes=True
-    )
+def history_store(hass: HomeAssistant, storage_key: str) -> Store[dict[str, object]]:
+    """Create the private store of historical readings for a storage key."""
+    return Store(hass, 1, f"{DOMAIN}_history.{storage_key}", private=True, atomic_writes=True)
 
 
 @dataclass(slots=True)
@@ -403,13 +400,15 @@ class OCEAHistoryManager:
         entry: ConfigEntry,
         client: OCEAApiClient,
         coordinator: OCEADataUpdateCoordinator,
+        local_id: str,
+        storage_key: str,
     ) -> None:
         self.hass = hass
         self.entry = entry
         self.client = client
         self.coordinator = coordinator
-        self.local_id: str = entry.data[CONF_LOCAL_ID]
-        self.store = history_store(hass, entry)
+        self.local_id = local_id
+        self.store = history_store(hass, storage_key)
         self._task: asyncio.Task[None] | None = None
         self._histories: dict[str, MeterHistory] | None = None
         self._generation: str | None = None

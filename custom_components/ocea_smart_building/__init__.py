@@ -59,7 +59,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: OCEAConfigEntry) -> bool
         await coordinator.async_config_entry_first_refresh()
         entry.runtime_data = coordinator
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-        history = OCEAHistoryManager(hass, entry, client, coordinator)
+        history = OCEAHistoryManager(
+            hass, entry, client, coordinator, entry.data[CONF_LOCAL_ID], entry.entry_id
+        )
         history.async_start()
     except BaseException:
         session.detach()
@@ -75,4 +77,4 @@ async def async_unload_entry(hass: HomeAssistant, entry: OCEAConfigEntry) -> boo
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Remove private cached readings, leaving recorder statistics intact."""
-    await history_store(hass, entry).async_remove()
+    await history_store(hass, entry.entry_id).async_remove()

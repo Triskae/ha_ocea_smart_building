@@ -124,9 +124,9 @@ async def test_migration_and_reload_preserve_leaks_without_restoring_consumption
 async def test_removing_entry_removes_cached_history(hass: HomeAssistant) -> None:
     """Removing an entry removes its cache, not Recorder statistics."""
     entry = MockConfigEntry(domain=DOMAIN)
-    await history_store(hass, entry).async_save({"meters": {}})
+    await history_store(hass, entry.entry_id).async_save({"meters": {}})
     await async_remove_entry(hass, entry)
-    assert await history_store(hass, entry).async_load() is None
+    assert await history_store(hass, entry.entry_id).async_load() is None
 
 
 @pytest.mark.usefixtures("enable_custom_integrations", "real_recorder")
