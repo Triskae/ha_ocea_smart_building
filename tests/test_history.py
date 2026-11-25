@@ -97,6 +97,19 @@ def _meter(
     )
 
 
+def _coordinator(
+    hass: HomeAssistant,
+    client: AsyncMock,
+    entry: MockConfigEntry,
+) -> OCEADataUpdateCoordinator:
+    return OCEADataUpdateCoordinator(
+        hass,
+        client,
+        entry,
+        local_id=entry.data[CONF_LOCAL_ID],
+    )
+
+
 def test_occupation_and_meter_dates_are_distinct() -> None:
     resident = OCEAResident.from_api({
         "occupations": [
@@ -154,7 +167,7 @@ async def test_history_does_not_fetch_without_unique_occupation(
     client = AsyncMock(spec=OCEAApiClient)
     client.get_resident.return_value = OCEAResident.from_api({"occupations": occupations})
     meter = _meter()
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(OCEAData(
         totals={},
         meters={meter.identifier: OCEAMeterReading(meter=meter, value=None, latest_date=None)},
@@ -210,7 +223,7 @@ async def test_dwelling_history_start_uses_selected_meters(
         for index, installation in enumerate(installations)
     ]
     meters.append(_meter("2023-01-01", fluid="EauChaude", pds_id="other"))
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(OCEAData(
         totals={},
         meters={
@@ -254,7 +267,7 @@ async def test_dwelling_fluids_have_independent_installation_bounds(
     client.get_pds_consumption.return_value = empty
     cold = _meter("2024-01-10", pds_id="cold")
     hot = _meter(hot_installation, fluid="EauChaude", pds_id="hot")
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(OCEAData(
         totals={},
         meters={
@@ -359,7 +372,7 @@ async def test_dwelling_history_backfill_correction_and_restore(
         })
 
     client.get_dwelling_consumption.side_effect = series
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(OCEAData(totals={}, meters={}))
     with patch(
         "custom_components.ocea_smart_building.history.dt_util.now",
@@ -452,7 +465,7 @@ async def test_dwelling_changed_bound_limits_rechecks_and_preserves_recorded_val
         }),
         empty, empty, empty, empty, empty,
     ]
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
 
     def set_meter(installation: str) -> None:
         meter = _meter(installation)
@@ -559,7 +572,7 @@ async def test_replaced_meter_bounds_requests_and_keeps_old_statistics(
         return OCEAConsumptionSeries.from_api({"unite": "m3", "consommations": readings})
 
     client.get_pds_consumption.side_effect = response
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     replacement = _meter("2024-01-10")
     new_pds = _meter("2024-01-15", pds_id="pds-2")
 
@@ -635,7 +648,7 @@ async def test_history_rejects_response_before_requested_floor(
     client.get_dwelling_consumption.return_value = response
     client.get_pds_consumption.return_value = response
     meter = _meter("2024-01-05")
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(OCEAData(
         totals={},
         meters={meter.identifier: OCEAMeterReading(meter=meter, value=None, latest_date=None)},
@@ -674,7 +687,7 @@ async def test_dwelling_cetc_rejects_non_energy_unit(hass: HomeAssistant) -> Non
     client.get_dwelling_consumption.return_value = OCEAConsumptionSeries.from_api({
         "unite": "m3", "consommations": [{"date": "2024-03-01", "valeur": 1}]
     })
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(OCEAData(totals={}, meters={}))
     synchronizer = OCEAHistorySynchronizer(
             hass, entry, client, coordinator, entry.data[CONF_LOCAL_ID], entry.entry_id
@@ -707,7 +720,7 @@ async def test_dwelling_uses_supported_pds_fluids(hass: HomeAssistant) -> None:
     client.get_dwelling_consumption.return_value = OCEAConsumptionSeries.from_api({
         "unite": "m3", "consommations": [{"date": "2024-03-01", "valeur": 1}]
     })
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(OCEAData(totals={}, meters={}))
     with (
         patch.dict(PDS_FLUID_METADATA, {"FutureWater": PDS_FLUID_METADATA["EauFroide"]}),
@@ -755,7 +768,7 @@ async def test_invalid_dwelling_period_does_not_block_other_fluid(
             "unite": "m3", "consommations": [{"date": "2024-03-01", "valeur": 2}]
         }),
     ]
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(OCEAData(totals={}, meters={}))
     synchronizer = OCEAHistorySynchronizer(
             hass, entry, client, coordinator, entry.data[CONF_LOCAL_ID], entry.entry_id
@@ -790,7 +803,7 @@ async def test_dwelling_backfill_requests_bounded_periods_across_restarts(
     client.get_dwelling_consumption.return_value = OCEAConsumptionSeries.from_api({
         "unite": "m3", "consommations": []
     })
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(OCEAData(totals={}, meters={}))
     with (
         patch(
@@ -830,7 +843,7 @@ async def test_backfill_splits_a_range_rejected_for_size(hass: HomeAssistant) ->
         }),
     ]
     meter = _meter()
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(
         OCEAData(
             totals={},
@@ -897,7 +910,7 @@ async def test_history_requests_respect_concurrency_limit(hass: HomeAssistant) -
     client.get_pds_consumption.side_effect = request
     client.get_dwelling_consumption.side_effect = request
     meters = [_meter(pds_id=f"pds-{index}") for index in range(4)]
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(
         OCEAData(
             totals={},
@@ -1047,7 +1060,7 @@ async def test_calendar_boundaries_recorder_correction_and_cache_restore(
         response([1.5, 2, 3]),
         OCEAConsumptionSeries.from_api({"unite": "m3", "consommations": []}),
     ]
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(OCEAData(totals={}, meters={}))
     current_day = first_day + timedelta(days=3)
     now = datetime.combine(current_day, datetime.min.time(), tzinfo=UTC)
@@ -1119,7 +1132,7 @@ async def test_existing_history_is_preserved_when_occupation_start_moves_forward
         }),
         OCEAConsumptionSeries.from_api({"unite": "m3", "consommations": []}),
     ]
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(OCEAData(totals={}, meters={}))
     with patch(
         "custom_components.ocea_smart_building.history.dt_util.now",
@@ -1219,7 +1232,7 @@ async def test_backfill_restart_and_correction_update_external_statistics(
         }),
     ]
     meter = _meter(fluid=fluid)
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(
         OCEAData(
             totals={},
@@ -1313,7 +1326,7 @@ async def test_failed_history_is_retried_without_blocking_recent_data(
         ),
     ]
     meter = _meter()
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(
         OCEAData(
             totals={},
@@ -1358,7 +1371,7 @@ async def test_current_month_backfill_reuses_coordinator_readings(hass: HomeAssi
         "occupations": [{"logementId": "local", "dateDebut": "2024-03-01T00:00:00Z", "dateFin": None}]
     })
     meter = _meter("2024-03-01")
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(
         OCEAData(
             totals={},
@@ -1414,7 +1427,7 @@ async def test_history_response_wins_over_stale_current_month_reading(
     client.get_pds_consumption.return_value = OCEAConsumptionSeries.from_api(
         {"unite": "m3", "consommations": [{"date": "2024-03-10", "valeur": 0.4}]}
     )
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(
         OCEAData(
             totals={},
@@ -1473,7 +1486,7 @@ async def test_invalid_cetc_data_does_not_advance_history(
         {"unite": "m3", "consommations": []}
     )
     meter = _meter("2024-03-01", CETC_FLUID)
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(
         OCEAData(totals={}, meters={meter.identifier: _build_meter_data(meter, response)})
     )
@@ -1515,7 +1528,7 @@ async def test_meter_type_change_keeps_water_and_energy_histories_separate(
     client.get_resident.return_value = OCEAResident.from_api({
         "occupations": [{"logementId": "local", "dateDebut": "2024-03-01T00:00:00Z", "dateFin": None}]
     })
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     synchronizer = OCEAHistorySynchronizer(
             hass, entry, client, coordinator, entry.data[CONF_LOCAL_ID], entry.entry_id
         )
@@ -1562,7 +1575,7 @@ async def test_invalid_meter_does_not_block_other_meters(hass: HomeAssistant) ->
         )
         for meter in (bad_meter, good_meter)
     }
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(OCEAData(totals={}, meters=readings))
     synchronizer = OCEAHistorySynchronizer(
             hass, entry, client, coordinator, entry.data[CONF_LOCAL_ID], entry.entry_id
@@ -1607,7 +1620,7 @@ async def test_missing_cache_reuses_existing_statistics_series(
         ),
     ]
     meter = _meter("2024-01-01")
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(
         OCEAData(
             totals={},
@@ -1773,7 +1786,7 @@ async def test_invalid_cache_rebuilds_without_changing_statistic_id(
         "occupations": [{"logementId": "local", "dateDebut": "2024-03-01T00:00:00Z", "dateFin": None}]
     })
     meter = _meter("2024-03-01")
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(
         OCEAData(
             totals={},
@@ -1813,7 +1826,7 @@ async def test_backfill_progress_advances_across_restart_without_five_hour_gate(
         {"unite": "m3", "consommations": []}
     )
     meter = _meter("2023-10-01")
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = _coordinator(hass, client, entry)
     coordinator.async_set_updated_data(
         OCEAData(
             totals={},

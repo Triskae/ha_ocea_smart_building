@@ -15,7 +15,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    CONF_LOCAL_ID,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     PDS_FLUID_METADATA,
@@ -180,6 +179,7 @@ class OCEADataUpdateCoordinator(DataUpdateCoordinator[OCEAData]):
         hass: HomeAssistant,
         client: OCEAApiClient,
         config_entry: OCEAConfigEntry,
+        local_id: str,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -190,7 +190,7 @@ class OCEADataUpdateCoordinator(DataUpdateCoordinator[OCEAData]):
             update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
         )
         self.client = client
-        self._local_id: str = config_entry.data[CONF_LOCAL_ID]
+        self.local_id = local_id
         self._meters: dict[str, OCEAMeter] = {}
 
     async def _async_setup(self) -> None:
@@ -204,7 +204,7 @@ class OCEADataUpdateCoordinator(DataUpdateCoordinator[OCEAData]):
         """Fetch data from the OCEA API."""
         _LOGGER.debug("OCEA coordinator: starting data fetch")
         try:
-            raw_data = await self.client.get_consumptions(self._local_id)
+            raw_data = await self.client.get_consumptions(self.local_id)
             payload = _current_month_payload(dt_util.now())
             meters = await self._fetch_readings(payload)
         except Exception as err:
@@ -222,7 +222,7 @@ class OCEADataUpdateCoordinator(DataUpdateCoordinator[OCEAData]):
         """Discover the configured dwelling's supported meters."""
         pds_data = [
             item
-            for item in await self.client.get_pds(self._local_id)
+            for item in await self.client.get_pds(self.local_id)
             if item.id and item.fluid is not None and item.fluid in PDS_FLUID_METADATA
         ]
         payload: OCEADevicesRequest = {"pdsIds": [str(item.id) for item in pds_data]}
@@ -243,7 +243,7 @@ class OCEADataUpdateCoordinator(DataUpdateCoordinator[OCEAData]):
         }
         for pds_id, meter in self._meters.items():
             try:
-                response = await self.client.get_pds_consumption(self._local_id, pds_id, payload)
+                response = await self.client.get_pds_consumption(self.local_id, pds_id, payload)
                 readings[pds_id] = _build_meter_data(meter, response)
             except OCEAAuthError:
                 raise

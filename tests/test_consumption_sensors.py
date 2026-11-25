@@ -47,7 +47,7 @@ def _coordinator(hass: HomeAssistant, client: Mock) -> OCEADataUpdateCoordinator
     """Create a coordinator bound to an actual config entry."""
     entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local-123"})
     entry.add_to_hass(hass)
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = OCEADataUpdateCoordinator(hass, client, entry, local_id="local-123")
     assert coordinator.config_entry is entry
     return coordinator
 
@@ -148,6 +148,35 @@ async def test_coordinator_uses_ocea_timezone(
     payload = client.get_pds_consumption.call_args.args[2]
     assert payload["debut"] == "2026-10-01T00:00:00.000Z"
     assert payload["fin"] == "2026-10-01T23:59:59.999Z"
+
+
+async def test_coordinator_uses_injected_local_id(hass: HomeAssistant) -> None:
+    """Use the explicitly configured dwelling instead of reading it from the entry."""
+    client = AsyncMock(spec=OCEAApiClient)
+    client.get_consumptions.return_value = []
+    client.get_pds.return_value = [
+        OCEAPdsData.from_api({"id": "pds-cold-1", "fluide": "EauFroide"}),
+    ]
+    client.get_appareils.return_value = []
+    client.get_pds_consumption.return_value = OCEAConsumptionSeries.from_api({
+        "consommations": []
+    })
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "entry-local"})
+    entry.add_to_hass(hass)
+    coordinator = OCEADataUpdateCoordinator(
+        hass, client, entry, local_id="injected-local"
+    )
+
+    await coordinator._async_setup()
+    await coordinator._async_update_data()
+
+    assert coordinator.local_id == "injected-local"
+    client.get_pds.assert_awaited_once_with("injected-local")
+    client.get_consumptions.assert_awaited_once_with("injected-local")
+    assert client.get_pds_consumption.call_args.args[:2] == (
+        "injected-local",
+        "pds-cold-1",
+    )
 
 
 async def test_coordinator_normalizes_cetc_consumption(hass: HomeAssistant) -> None:

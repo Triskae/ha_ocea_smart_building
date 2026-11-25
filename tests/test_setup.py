@@ -281,6 +281,7 @@ async def test_setup_stores_coordinator_in_entry_runtime_data(
         assert await async_setup_entry(hass, entry)
 
     assert entry.runtime_data is coordinator_class.return_value
+    assert coordinator_class.call_args.kwargs["local_id"] == "local-123"
     forward_entry_setups.assert_awaited_once_with(entry, PLATFORMS)
 
 
