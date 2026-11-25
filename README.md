@@ -273,6 +273,9 @@ can access the internet. If your credentials have changed, use the integration's
 reload the integration to rediscover the available meters. The System Health
 page can help identify connection or meter-reading failures.
 
+If history synchronization encounters an unexpected error, it logs the error
+and retries automatically; historical statistics may be delayed.
+
 Debug logging can also be enabled:
 
 ```yaml

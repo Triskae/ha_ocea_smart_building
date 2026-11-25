@@ -22,7 +22,6 @@ from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     get_last_statistics,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
@@ -397,19 +396,19 @@ class OCEAHistoryManager:
     def __init__(
         self,
         hass: HomeAssistant,
-        entry: ConfigEntry,
         client: OCEAApiClient,
         coordinator: OCEADataUpdateCoordinator,
         local_id: str,
         storage_key: str,
     ) -> None:
         self.hass = hass
-        self.entry = entry
         self.client = client
         self.coordinator = coordinator
         self.local_id = local_id
         self.store = history_store(hass, storage_key)
         self._task: asyncio.Task[None] | None = None
+        self._stop_lock = asyncio.Lock()
+        self._stopped = False
         self._histories: dict[str, MeterHistory] | None = None
         self._generation: str | None = None
         self._published: set[str] = set()
@@ -474,26 +473,64 @@ class OCEAHistoryManager:
 
     @callback
     def async_start(self) -> None:
-        """Start the entry-scoped backfill and daily synchronization worker."""
+        """Start the dwelling-scoped backfill and daily synchronization worker."""
+        if self._stopped:
+            return
         if self._task is not None and not self._task.done():
             return
-        self._task = self.entry.async_create_background_task(
-            self.hass, self._async_run(), "OCEA consumption history"
+        self._task = self.hass.async_create_background_task(
+            self._async_run(), "OCEA consumption history"
         )
+
+    async def async_stop(self) -> None:
+        """Stop the history worker and wait for its cleanup."""
+        async with self._stop_lock:
+            if self._stopped:
+                return
+            self._stopped = True
+            if (task := self._task) is None:
+                return
+            if not task.done():
+                task.cancel("OCEA history manager stopping")
+            try:
+                await task
+            except asyncio.CancelledError:
+                current_task = asyncio.current_task()
+                if current_task is not None and current_task.cancelling():
+                    raise
 
     async def _async_run(self) -> None:
         """Run backfill continuously, then synchronize once per day."""
         while True:
-            await self._async_sync()
-            now = dt_util.utcnow()
-            if self._global_next_request is not None and self._global_next_request > now:
-                delay = (self._global_next_request - now).total_seconds()
-            elif (retry_delay := self._backfill_delay()) is not None:
-                delay = retry_delay
-            elif self._has_pending_backfill():
-                delay = 0
-            else:
-                delay = _DAILY_SYNC_INTERVAL.total_seconds()
+            failed = False
+            try:
+                await self._async_sync()
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.error(
+                    "Unexpected error synchronizing OCEA consumption history (%s)",
+                    type(err).__name__,
+                )
+                failed = True
+
+            try:
+                now = dt_util.utcnow()
+                if self._global_next_request is not None and self._global_next_request > now:
+                    delay = (self._global_next_request - now).total_seconds()
+                elif (retry_delay := self._backfill_delay()) is not None:
+                    delay = retry_delay
+                elif self._has_pending_backfill():
+                    delay = 0
+                else:
+                    delay = _DAILY_SYNC_INTERVAL.total_seconds()
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.error(
+                    "Unable to schedule OCEA consumption history synchronization (%s)",
+                    type(err).__name__,
+                )
+                delay = _RETRY_BASE_SECONDS
+
+            if failed:
+                delay = max(delay, _RETRY_BASE_SECONDS)
             await asyncio.sleep(delay)
 
     def _has_pending_backfill(self) -> bool:
@@ -625,7 +662,8 @@ class OCEAHistoryManager:
             try:
                 async with self._request_semaphore:
                     await sync()
-            except (OCEAAuthError, OCEAApiError, ClientError, TimeoutError, OSError) as err:
+            except Exception as err:  # noqa: BLE001
+                # Wait for the other series before propagating unexpected errors.
                 return kind, series_item, err
             return kind, series_item, None
 
@@ -641,8 +679,10 @@ class OCEAHistoryManager:
                 _LOGGER.warning("Unable to authenticate while synchronizing OCEA history")
             elif isinstance(error, OCEAApiError):
                 _LOGGER.warning("Unable to synchronize one OCEA %s history: %s", kind, error)
-            else:
+            elif isinstance(error, (ClientError, TimeoutError, OSError)):
                 _LOGGER.warning("Unable to synchronize one OCEA %s history", kind)
+            else:
+                raise error
         if authentication_failed:
             self._set_global_retry(now)
             return
@@ -873,6 +913,3 @@ class OCEAHistoryManager:
             )
         )
         self._global_next_request = now + timedelta(seconds=delay)
-
-
-OCEAHistorySynchronizer = OCEAHistoryManager
