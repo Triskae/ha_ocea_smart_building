@@ -60,13 +60,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: OCEAConfigEntry) -> bool
         entry.runtime_data = coordinator
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         history = OCEAHistoryManager(
-            hass, entry, client, coordinator, entry.data[CONF_LOCAL_ID], entry.entry_id
+            hass, client, coordinator, entry.data[CONF_LOCAL_ID], entry.entry_id
         )
         history.async_start()
     except BaseException:
         session.detach()
         raise
     entry.async_on_unload(session.detach)
+    entry.async_on_unload(history.async_stop)
     return True
 
 

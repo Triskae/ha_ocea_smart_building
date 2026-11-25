@@ -22,7 +22,6 @@ from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     get_last_statistics,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
@@ -397,19 +396,19 @@ class OCEAHistoryManager:
     def __init__(
         self,
         hass: HomeAssistant,
-        entry: ConfigEntry,
         client: OCEAApiClient,
         coordinator: OCEADataUpdateCoordinator,
         local_id: str,
         storage_key: str,
     ) -> None:
         self.hass = hass
-        self.entry = entry
         self.client = client
         self.coordinator = coordinator
         self.local_id = local_id
         self.store = history_store(hass, storage_key)
         self._task: asyncio.Task[None] | None = None
+        self._stop_lock = asyncio.Lock()
+        self._stopped = False
         self._histories: dict[str, MeterHistory] | None = None
         self._generation: str | None = None
         self._published: set[str] = set()
@@ -474,12 +473,31 @@ class OCEAHistoryManager:
 
     @callback
     def async_start(self) -> None:
-        """Start the entry-scoped backfill and daily synchronization worker."""
+        """Start the dwelling-scoped backfill and daily synchronization worker."""
+        if self._stopped:
+            return
         if self._task is not None and not self._task.done():
             return
-        self._task = self.entry.async_create_background_task(
-            self.hass, self._async_run(), "OCEA consumption history"
+        self._task = self.hass.async_create_background_task(
+            self._async_run(), "OCEA consumption history"
         )
+
+    async def async_stop(self) -> None:
+        """Stop the history worker and wait for its cleanup."""
+        async with self._stop_lock:
+            if self._stopped:
+                return
+            self._stopped = True
+            if (task := self._task) is None:
+                return
+            if not task.done():
+                task.cancel("OCEA history manager stopping")
+            try:
+                await task
+            except asyncio.CancelledError:
+                current_task = asyncio.current_task()
+                if current_task is not None and current_task.cancelling():
+                    raise
 
     async def _async_run(self) -> None:
         """Run backfill continuously, then synchronize once per day."""
@@ -895,6 +913,3 @@ class OCEAHistoryManager:
             )
         )
         self._global_next_request = now + timedelta(seconds=delay)
-
-
-OCEAHistorySynchronizer = OCEAHistoryManager

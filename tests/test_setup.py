@@ -159,6 +159,10 @@ async def test_unload_cancels_history_task(hass: HomeAssistant) -> None:
         await asyncio.wait_for(started.wait(), timeout=3)
         assert await hass.config_entries.async_unload(entry.entry_id)
         assert cancelled.is_set()
+        assert not any(
+            task.get_name() == "OCEA consumption history" and not task.done()
+            for task in asyncio.all_tasks()
+        )
 
 
 @pytest.mark.usefixtures("enable_custom_integrations", "real_recorder")

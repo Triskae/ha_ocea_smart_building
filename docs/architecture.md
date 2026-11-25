@@ -57,9 +57,9 @@ C4Component
 
   Container_Boundary(integration, "OCEA Smart Building custom integration") {
     Component(configFlow, "Config flow", "config_flow.py", "Validates credentials and manages setup, reauthentication, and reconfiguration")
-    Component(entrySetup, "Entry lifecycle", "__init__.py", "Creates entry-scoped client resources and loads or unloads platforms")
+    Component(entrySetup, "Entry lifecycle", "__init__.py", "Creates entry-scoped client resources, loads platforms, and stops history on unload")
     Component(coordinator, "Data update coordinator", "coordinator.py", "Discovers meters, polls OCEA, and normalizes typed readings")
-    Component(history, "History manager", "history.py", "Backfills dwelling and PDS statistics and updates corrected readings independently of current-data polling")
+    Component(history, "History manager", "history.py", "Owns its background worker, backfills dwelling and PDS statistics, and updates corrected readings independently of current-data polling")
     Component(entities, "Entity platforms", "sensor.py, binary_sensor.py, entity.py", "Expose water leak estimates and alerts")
     Component(apiClient, "OCEA API client and models", "ocea/client.py, ocea/models.py", "Makes asynchronous API requests and validates response shapes")
     Component(authentication, "B2C authentication", "ocea/auth.py", "Performs browser-compatible authorization, PKCE, and token refresh")
@@ -71,14 +71,14 @@ C4Component
 
   Rel(configFlow, apiClient, "Validates credentials and fetches resident data")
   Rel(configFlow, homeAssistant, "Creates or updates validated config entries")
-  Rel(entrySetup, homeAssistant, "Creates an entry-scoped HTTP session and forwards platforms")
+  Rel(entrySetup, homeAssistant, "Creates an entry-scoped HTTP session, forwards platforms, and registers unload cleanup")
   Rel(entrySetup, coordinator, "Initializes and stores")
   Rel(coordinator, apiClient, "Fetches dwelling and meter readings")
   Rel(apiClient, authentication, "Obtains or refreshes access tokens")
   Rel(authentication, b2c, "Runs the authorization-code flow", "HTTPS")
   Rel(apiClient, oceaApi, "Reads resident and consumption endpoints", "HTTPS/JSON")
   Rel(coordinator, entities, "Publishes normalized coordinator data")
-  Rel(entrySetup, history, "Starts and scopes")
+  Rel(entrySetup, history, "Starts; invokes stop on entry unload")
   Rel(history, coordinator, "Reads current validated readings without scheduling from refreshes")
   Rel(history, apiClient, "Fetches dated PDS and dwelling readings")
   Rel(history, homeAssistant, "Imports external Recorder statistics")
@@ -187,21 +187,24 @@ If the Store is absent or invalid, the manager can rebuild under the current
 statistic ID using Recorder and OCEA data; Recorder rows at matching timestamps
 can be updated and are not reset by cache reconstruction.
 
-The history manager is an entry-scoped background service, separate from the
-five-hour data coordinator. It backfills in inclusive periods of up to 90 days,
-reducing the persisted per-series range after an HTTP 413 response. Concurrent
-history requests are capped at three per entry. API and network errors during
-history requests leave the series cursor in place and use a persisted
-exponential retry delay. Authentication failures and failures during resident
-or fluid discovery use a global exponential retry delay held in memory. A
-failed series does not block the others.
+The history manager owns its background task, separate from the five-hour data
+coordinator. Entry setup starts the manager and registers `async_stop()` for
+entry unload; `async_stop()` cancels and awaits its worker. The worker uses Home
+Assistant's background-task API, which also cancels it during Home Assistant
+shutdown. It backfills in inclusive periods of up to 90 days, reducing the
+persisted per-series range after an HTTP 413 response. Concurrent history
+requests are capped at three per manager. API and network errors during history
+requests leave the series cursor in place and use a persisted exponential retry
+delay. Authentication failures and failures during resident or fluid discovery
+use a global exponential retry delay held in memory. A failed series does not
+block the others.
 
 Unexpected synchronization errors are logged by exception type without their
 details. If a series fails unexpectedly, the worker waits for the other
 concurrent series to finish. It retries synchronization after at least 60
 seconds, respecting longer scheduled delays. An unexpected scheduling error
-also results in a 60-second delay. Cancellation still propagates when the
-entry is unloaded.
+also results in a 60-second delay. During entry unload, `async_stop()` awaits
+worker cancellation before the session is detached.
 
 The manager requests history only through the last completed day in its
 `Europe/Paris` calendar.
@@ -226,10 +229,10 @@ endpoints; dwelling and PDS totals may overlap and must not be added together.
 
 | Module | Responsibility |
 | --- | --- |
-| `__init__.py` | Config-entry lifecycle: create the entry-scoped HTTP session and API client, perform the first coordinator refresh, forward platforms, and unload them. |
+| `__init__.py` | Config-entry lifecycle: create the entry-scoped HTTP session and API client, perform the first coordinator refresh, forward platforms, and register history-worker cleanup on unload. |
 | `config_flow.py` | Initial setup, reauthentication, and reconfiguration. Validate credentials with the client, derive the dwelling ID and title from resident data, and persist the validated config. |
 | `coordinator.py` | Discover PDS/meter metadata at startup; fetch and normalize dwelling totals and per-meter readings; expose a typed coordinator payload and translate API failures to Home Assistant update/auth errors. |
-| `history.py` | Run an entry-scoped backfill and daily history service for dwelling and PDS water and CETC readings, persist per-series progress, and enqueue external Recorder statistics. |
+| `history.py` | Own the background-task lifecycle for dwelling and PDS history, persist per-series progress, and enqueue external Recorder statistics. |
 | `entity.py` | Shared coordinator entity base, device metadata, and stable unique-ID construction for dwelling and meter entities. |
 | `sensor.py` | Estimated-leak sensors for water meters when OCEA provides estimates. |
 | `binary_sensor.py` | Per-meter leak state, derived from the latest estimated-leak value. Missing estimates are represented as unavailable, not as “no leak.” |
