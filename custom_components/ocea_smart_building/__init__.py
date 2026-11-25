@@ -54,7 +54,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: OCEAConfigEntry) -> bool
         session=session,
     )
 
-    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator = OCEADataUpdateCoordinator(
+        hass,
+        client,
+        entry,
+        local_id=entry.data[CONF_LOCAL_ID],
+    )
     try:
         await coordinator.async_config_entry_first_refresh()
         entry.runtime_data = coordinator

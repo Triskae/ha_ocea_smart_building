@@ -27,7 +27,7 @@ def _sensor(
     """Create a leak sensor with one meter reading."""
     entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local-123"})
     entry.add_to_hass(hass)
-    coordinator = OCEADataUpdateCoordinator(hass, Mock(), entry)
+    coordinator = OCEADataUpdateCoordinator(hass, Mock(), entry, local_id="local-123")
     meter = OCEAMeter.from_api(
         {"id": "pds-cold-1", "fluide": "EauFroide"},
         {"pdsId": "pds-cold-1", "numeroSerie": "SERIAL-1"},
