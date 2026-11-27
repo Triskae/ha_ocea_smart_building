@@ -46,10 +46,13 @@ from custom_components.ocea_smart_building.history import (
     _dwelling_statistic_id,
     _history_id,
     _history_start,
+    _load_histories,
     _meter_metadata,
     _meter_statistic_id,
     _occupation_start,
     _parse_daily_response,
+    _period_end,
+    _serialize_histories,
     history_store,
 )
 from custom_components.ocea_smart_building.ocea import (
@@ -110,6 +113,63 @@ def test_occupation_and_meter_dates_are_distinct() -> None:
     assert _history_start(date(2024, 1, 4), _meter()) == date(2024, 1, 4)
     with pytest.raises(OCEAApiError):
         _history_start(start, _meter(None))
+
+
+@pytest.mark.parametrize(
+    ("start", "expected_end"),
+    [
+        (date(2026, 1, 2), date(2026, 3, 31)),
+        (date(2026, 2, 1), date(2026, 4, 30)),
+        (date(2026, 3, 20), date(2026, 5, 31)),
+        (date(2026, 11, 10), date(2027, 1, 31)),
+        (date(2026, 12, 31), date(2027, 2, 28)),
+        (date(2023, 12, 10), date(2024, 2, 29)),
+    ],
+)
+def test_history_period_end_uses_calendar_months(start: date, expected_end: date) -> None:
+    """Count the start month as the first of three calendar months."""
+    assert _period_end(start, date(2027, 12, 31), None) == expected_end
+
+
+def test_history_period_end_applies_limit_and_adaptive_cap() -> None:
+    """Bound a calendar period by today or its persisted HTTP 413 cap."""
+    start = date(2026, 3, 20)
+    assert _period_end(start, date(2026, 4, 15), None) == date(2026, 4, 15)
+    assert _period_end(start, date(2026, 12, 31), 10) == date(2026, 3, 29)
+
+
+def test_history_restores_legacy_chunk_days() -> None:
+    """Treat the old default as uncapped and preserve an adaptive 413 cap."""
+    generation, histories = _load_histories({
+        "generation": "generation",
+        "meters": {
+            "legacy-default": {
+                "start": "2024-01-01",
+                "cursor": "2024-01-01",
+                "days": {},
+                "chunk_days": 90,
+            },
+            "adaptive": {
+                "start": "2024-01-01",
+                "cursor": "2024-01-01",
+                "days": {},
+                "chunk_days": 45,
+            },
+            "no-field": {
+                "start": "2024-01-01",
+                "cursor": "2024-01-01",
+                "days": {},
+            },
+        },
+    })
+    assert histories["legacy-default"].chunk_days is None
+    assert histories["adaptive"].chunk_days == 45
+    assert histories["no-field"].chunk_days is None
+    serialized = _serialize_histories(generation, histories)
+    meters = serialized["meters"]
+    assert isinstance(meters, dict)
+    assert meters["legacy-default"]["chunk_days"] is None
+    assert meters["adaptive"]["chunk_days"] == 45
 
 
 @pytest.mark.parametrize(
@@ -779,7 +839,7 @@ async def test_invalid_dwelling_period_does_not_block_other_fluid(
 async def test_dwelling_backfill_requests_bounded_periods_across_restarts(
     hass: HomeAssistant,
 ) -> None:
-    """Backfill in at most 90-day chunks, excluding the unconfirmed current day."""
+    """Backfill three calendar months at a time across restarts."""
     entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local"})
     entry.add_to_hass(hass)
     client = AsyncMock(spec=OCEAApiClient)
@@ -805,9 +865,73 @@ async def test_dwelling_backfill_requests_bounded_periods_across_restarts(
         )._async_sync()
     payloads = [call.args[2] for call in client.get_dwelling_consumption.call_args_list]
     assert [(payload["debut"][:10], payload["fin"][:10]) for payload in payloads] == [
-        ("2023-10-01", "2023-12-29"),
-        ("2023-12-30", "2024-03-14"),
+        ("2023-10-01", "2023-12-31"),
+        ("2024-01-01", "2024-03-14"),
     ]
+
+
+async def test_old_history_recheck_uses_calendar_periods(hass: HomeAssistant) -> None:
+    """Recheck old data using the same calendar boundaries as the backfill."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOCAL_ID: "local"})
+    entry.add_to_hass(hass)
+    meter = _meter("2024-01-01")
+    key = _meter_statistic_id("local", meter)
+    await history_store(hass, entry.entry_id).async_save({
+        "generation": "generation",
+        "meters": {
+            key: {
+                "start": "2024-01-01",
+                "cursor": "2024-06-15",
+                "days": {},
+                "recheck_cursor": "2024-01-01",
+                "last_old_recheck": "2024-06-01",
+                "request_floor": "2024-01-01",
+            }
+        },
+    })
+    client = AsyncMock(spec=OCEAApiClient)
+    client.get_resident.return_value = OCEAResident.from_api({
+        "occupations": [{
+            "logementId": "local",
+            "dateDebut": "2024-01-01T00:00:00Z",
+            "dateFin": None,
+        }]
+    })
+    client.get_dwelling_fluids.return_value = []
+    client.get_pds_consumption.return_value = OCEAConsumptionSeries.from_api({
+        "unite": "m3",
+        "consommations": [],
+    })
+    coordinator = OCEADataUpdateCoordinator(hass, client, entry)
+    coordinator.async_set_updated_data(
+        OCEAData(
+            totals={},
+            meters={
+                meter.identifier: _build_meter_data(
+                    meter, {"unite": "m3", "consommations": []}
+                )
+            },
+        )
+    )
+    with (
+        patch(
+            "custom_components.ocea_smart_building.history.dt_util.now",
+            return_value=datetime(2024, 6, 15, tzinfo=UTC),
+        ),
+        patch("custom_components.ocea_smart_building.history.async_add_external_statistics"),
+    ):
+        synchronizer = OCEAHistorySynchronizer(
+            hass, entry, client, coordinator, entry.data[CONF_LOCAL_ID], entry.entry_id
+        )
+        await synchronizer._async_sync()
+
+    payload = client.get_pds_consumption.call_args.args[2]
+    assert (payload["debut"][:10], payload["fin"][:10]) == (
+        "2024-01-01",
+        "2024-03-31",
+    )
+    assert synchronizer._histories is not None
+    assert synchronizer._histories[key].recheck_cursor == date(2024, 4, 1)
 
 
 async def test_backfill_splits_a_range_rejected_for_size(hass: HomeAssistant) -> None:
@@ -856,14 +980,16 @@ async def test_backfill_splits_a_range_rejected_for_size(hass: HomeAssistant) ->
     requests = [call.args[2] for call in client.get_pds_consumption.call_args_list]
     assert (requests[0]["debut"][:10], requests[0]["fin"][:10]) == (
         "2024-01-03",
-        "2024-04-01",
+        "2024-03-31",
     )
     assert (requests[1]["debut"][:10], requests[1]["fin"][:10]) == (
         "2024-01-03",
-        "2024-02-16",
+        "2024-02-15",
     )
     assert synchronizer._histories is not None
-    assert synchronizer._histories[_meter_statistic_id("local", meter)].cursor == date(2024, 2, 17)
+    history = synchronizer._histories[_meter_statistic_id("local", meter)]
+    assert history.cursor == date(2024, 2, 16)
+    assert history.chunk_days == 44
 
 
 async def test_history_requests_respect_concurrency_limit(hass: HomeAssistant) -> None:
@@ -1848,8 +1974,8 @@ async def test_backfill_progress_advances_across_restart_without_five_hour_gate(
     assert client.get_pds_consumption.await_count == 3
     payloads = [call.args[2] for call in client.get_pds_consumption.call_args_list]
     assert payloads[0]["debut"].startswith("2023-10-01")
-    assert payloads[0]["fin"].startswith("2023-12-29")
-    assert payloads[1]["debut"].startswith("2023-12-30")
+    assert payloads[0]["fin"].startswith("2023-12-31")
+    assert payloads[1]["debut"].startswith("2024-01-01")
     assert payloads[1]["fin"].startswith("2024-03-11")
 
 

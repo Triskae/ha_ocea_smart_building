@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import calendar
 import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
@@ -42,7 +43,7 @@ from .ocea.const import OCEA_TIME_ZONE
 from .ocea.models import OCEAConsumptionRequest, OCEAConsumptionSeries
 
 _LOGGER = logging.getLogger(__name__)
-_CHUNK_DAYS: Final = 90
+_LEGACY_CHUNK_DAYS: Final = 90
 _MAX_CONCURRENT_REQUESTS: Final = 3
 _MAX_RETRIES: Final = 5
 _RETRY_BASE_SECONDS: Final = 60
@@ -68,7 +69,7 @@ class MeterHistory:
     next_request: datetime | None = None
     recheck_cursor: date | None = None
     retry_count: int = 0
-    chunk_days: int = _CHUNK_DAYS
+    chunk_days: int | None = None
     last_old_recheck: date | None = None
     request_floor: date | None = None
 
@@ -110,6 +111,17 @@ def _occupation_start(
 def _history_start(occupation_start: date, meter: OCEAMeter) -> date:
     """Bound a meter's history by both occupation and device installation."""
     return max(occupation_start, _api_date(meter.installation_date))
+
+
+def _period_end(start: date, limit: date, chunk_days: int | None) -> date:
+    """Return the inclusive end of a three-calendar-month period."""
+    month_index = start.month - 1 + 2
+    year = start.year + month_index // 12
+    month = month_index % 12 + 1
+    end = date(year, month, calendar.monthrange(year, month)[1])
+    if chunk_days is not None:
+        end = min(end, start + timedelta(days=chunk_days - 1))
+    return min(end, limit)
 
 
 def _dwelling_history_start(
@@ -275,7 +287,15 @@ def _load_histories(data: dict[str, object] | None) -> tuple[str, dict[str, Mete
         raw_next_request = raw.get("next_request")
         next_request: datetime | None = None
         retry_count = raw.get("retry_count", 0)
-        chunk_days = raw.get("chunk_days", _CHUNK_DAYS)
+        chunk_days = raw.get("chunk_days")
+        if chunk_days is not None and (
+            not isinstance(chunk_days, int)
+            or isinstance(chunk_days, bool)
+            or not 1 <= chunk_days <= _LEGACY_CHUNK_DAYS
+        ):
+            raise OCEAApiError("Invalid persisted consumption history")
+        if chunk_days == _LEGACY_CHUNK_DAYS:
+            chunk_days = None
         last_old_recheck = (
             _api_date(raw["last_old_recheck"])
             if raw.get("last_old_recheck") is not None
@@ -285,8 +305,6 @@ def _load_histories(data: dict[str, object] | None) -> tuple[str, dict[str, Mete
             _api_date(raw["request_floor"]) if raw.get("request_floor") is not None else None
         )
         if not isinstance(retry_count, int) or isinstance(retry_count, bool):
-            raise OCEAApiError("Invalid persisted consumption history")
-        if not isinstance(chunk_days, int) or isinstance(chunk_days, bool) or not 1 <= chunk_days <= _CHUNK_DAYS:
             raise OCEAApiError("Invalid persisted consumption history")
         if raw_next_request is not None and "retry_count" in raw:
             if not isinstance(raw_next_request, str):
@@ -721,7 +739,7 @@ class OCEAHistoryManager:
         older_recheck = False
         if history.cursor <= today:
             request_start = history.cursor
-            end = min(request_start + timedelta(days=history.chunk_days - 1), today)
+            end = _period_end(request_start, today, history.chunk_days)
             advance_cursor = True
         elif (request_floor := history.request_floor or history.start) < today:
             old_history_end = today - timedelta(days=_RECENT_OVERLAP_DAYS)
@@ -732,10 +750,7 @@ class OCEAHistoryManager:
                 request_start = history.recheck_cursor or request_floor
                 if request_start > old_history_end:
                     request_start = request_floor
-                end = min(
-                    request_start + timedelta(days=history.chunk_days - 1),
-                    old_history_end,
-                )
+                end = _period_end(request_start, old_history_end, history.chunk_days)
                 older_recheck = True
             else:
                 request_start = max(
@@ -793,13 +808,9 @@ class OCEAHistoryManager:
                             range_days = (end - request_start).days + 1
                             history.chunk_days = max(
                                 1,
-                                min(history.chunk_days, range_days // 2),
+                                min(history.chunk_days or range_days, range_days // 2),
                             )
-                            end = min(
-                                request_start
-                                + timedelta(days=history.chunk_days - 1),
-                                end,
-                            )
+                            end = _period_end(request_start, end, history.chunk_days)
                             continue
                         break
                 if any(not request_start <= item.day <= end for item in items):

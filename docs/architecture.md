@@ -188,11 +188,12 @@ statistic ID using Recorder and OCEA data; Recorder rows at matching timestamps
 can be updated and are not reset by cache reconstruction.
 
 The history manager is an entry-scoped background service, separate from the
-five-hour data coordinator. It backfills in inclusive periods of up to 90 days,
-reducing the persisted per-series range after an HTTP 413 response. Concurrent
-history requests are capped at three per entry. Network, rate-limit, server,
-and other API failures leave the cursor in place and use a persisted exponential
-retry delay; a failed series does not block the others.
+five-hour data coordinator. It backfills inclusive periods through the last day
+of the third calendar month, counting the start month, and reduces the
+persisted per-series range after an HTTP 413 response. Concurrent history
+requests are capped at three per entry. Network, rate-limit, server, and other
+API failures leave the cursor in place and use a persisted exponential retry
+delay; a failed series does not block the others.
 
 The manager requests history only through the last completed day in its
 `Europe/Paris` calendar.

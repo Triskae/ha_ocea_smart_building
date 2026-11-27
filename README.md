@@ -215,13 +215,14 @@ and that PDS's selected meter installation date. A unique current occupation is
 required; missing or ambiguous start dates prevent backfill.
 
 The history manager runs separately from the five-hour current-data coordinator.
-It backfills completed days in periods of up to 90 days per series, reducing the
-period if the server responds with HTTP 413. Once caught up, it checks the last
-three completed days daily and revisits older periods weekly. A correction is
-applied when its period is rechecked; the time for a full pass depends on the
-amount of history. Missing readings are not estimated, and an omitted date is not
-treated as zero or as a deletion. Earlier readings from a replaced meter may not
-be requested from OCEA, but already imported readings are retained.
+It backfills completed days in periods ending on the last day of the third
+calendar month, counting the start month, and reduces a period if the server
+responds with HTTP 413. Once caught up, it checks the last three completed days
+daily and revisits older periods weekly. A correction is applied when its period
+is rechecked; the time for a full pass depends on the amount of history. Missing
+readings are not estimated, and an omitted date is not treated as zero or as a
+deletion. Earlier readings from a replaced meter may not be requested from
+OCEA, but already imported readings are retained.
 
 The integration uses `Europe/Paris` as its calendar convention; OCEA's actual
 aggregation timezone is not established. Daily values are assigned to the last
