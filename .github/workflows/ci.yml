@@ -43,6 +43,16 @@ jobs:
           --cov-report=term-missing
           --cov-report=json:${{ runner.temp }}/ocea-coverage.json
 
+      - name: Validate OpenAPI reference
+        run: >-
+          uvx --from "openapi-spec-validator==0.7.2"
+          openapi-spec-validator docs/api/openapi.yaml
+
+      - name: Validate API fixtures
+        run: >-
+          uv run --python 3.14.2 --with "jsonschema==4.25.1" --with pyyaml
+          python scripts/validate_api_fixtures.py
+
       - name: Check OCEA per-module coverage
         run: >-
           python3 scripts/check_ocea_coverage.py

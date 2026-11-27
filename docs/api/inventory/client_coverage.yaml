@@ -1,0 +1,27 @@
+version: 1
+# Operation-level coverage does not claim that every response field is parsed.
+operations:
+  - {id: getComfortMeasurements, status: not_implemented}
+  - {id: getConsumptionInsights, status: not_implemented}
+  - {id: getCurrentDwellingAlerts, status: not_implemented}
+  - {id: getCurrentThresholdAlerts, status: not_implemented}
+  - id: getDashboardConsumption
+    status: implemented
+    methods: [get_consumptions, check_dwelling_access]
+  - {id: getDashboardMeasurements, status: not_implemented}
+  - {id: getDevicesByPds, status: implemented, methods: [get_appareils]}
+  - id: getDwelling
+    status: implemented
+    methods: [get_dwelling_details, get_dwelling_fluids]
+    note: The client interprets a subset of dwelling fields.
+  - {id: getDwellingAlertHistory, status: not_implemented}
+  - {id: getDwellingConsumption, status: implemented, methods: [get_dwelling_consumption]}
+  - {id: getDwellingDevices, status: not_implemented}
+  - {id: getElectricityProfile, status: not_implemented}
+  - {id: getGoal, status: not_implemented}
+  - {id: getPds, status: implemented, methods: [get_pds]}
+  - {id: getPdsConsumption, status: implemented, methods: [get_pds_consumption]}
+  - {id: getResident, status: implemented, methods: [get_resident]}
+  - {id: getResidentLinks, status: not_implemented}
+  - {id: getSite, status: not_implemented}
+  - {id: getThresholdAlertHistory, status: not_implemented}

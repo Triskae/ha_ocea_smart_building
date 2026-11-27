@@ -1,0 +1,734 @@
+openapi: 3.1.0
+info:
+  title: OCEA resident API - read-only reference
+  version: 0.1.0
+  description: >-
+    Independent, incomplete reference derived from the resident portal and the
+    integration, not an official contract. Portal declarations do not establish
+    current availability, authorization, absence of every side effect, or a
+    complete response schema. Recorded HTTP 200 responses and request
+    directions are identified in the inventory; generated-client support for
+    HTTP 204 does not establish that the service returns it. See README.md
+    and READ_ONLY_POLICY.md.
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/resident:
+    get:
+      operationId: getResident
+      x-ocea-access-mode: read-only
+      summary: Read the current resident and occupations
+      responses:
+        '200':
+          description: Resident information; field presence is not guaranteed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Resident'}
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/resident/elecType:
+    get:
+      operationId: getElectricityProfile
+      x-ocea-access-mode: read-only
+      summary: Read the resident electricity profile
+      responses:
+        '200':
+          description: >-
+            Profile response; its complete schema is unknown. The portal
+            declares ChauffageChauffeEau, ChauffageNoChauffeEau,
+            NoChauffageChauffeEau, NoChauffageNoChauffeEau, and NoResponse
+            as profile values, without establishing the response shape.
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/resident/links:
+    get:
+      operationId: getResidentLinks
+      x-ocea-access-mode: read-only
+      summary: Read resident links
+      responses:
+        '200': {description: Links response; its complete schema is unknown.}
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/objectif:
+    get:
+      operationId: getGoal
+      x-ocea-access-mode: read-only
+      summary: Read consumption goals
+      responses:
+        '200':
+          description: Goals; field types and presence are not established.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  eauFroide: {}
+                  eauChaude: {}
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/site/{codeSite}:
+    parameters:
+      - {$ref: '#/components/parameters/codeSite'}
+    get:
+      operationId: getSite
+      x-ocea-access-mode: read-only
+      summary: Read site configuration
+      responses:
+        '200':
+          description: Site configuration; complete schema is unknown.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  codeSite: {}
+                  type:
+                    description: >-
+                      Site types declared by the portal include Disabled,
+                      Conso, and Documentaire. Other values may exist.
+                    examples: [Disabled, Conso, Documentaire]
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/local/{localId}:
+    parameters:
+      - {$ref: '#/components/parameters/localId'}
+    get:
+      operationId: getDwelling
+      x-ocea-access-mode: read-only
+      summary: Read dwelling details and advertised fluids
+      responses:
+        '200':
+          description: Dwelling information; complete schema is unknown.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Dwelling'}
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/local/{localId}/appareils:
+    parameters:
+      - {$ref: '#/components/parameters/localId'}
+    get:
+      operationId: getDwellingDevices
+      x-ocea-access-mode: read-only
+      summary: Read devices for a dwelling
+      responses:
+        '200': {description: Device response; its complete schema is unknown.}
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/local/{localId}/pds:
+    parameters:
+      - {$ref: '#/components/parameters/localId'}
+    get:
+      operationId: getPds
+      x-ocea-access-mode: read-only
+      summary: Read dwelling measurement points
+      responses:
+        '200':
+          description: Measurement points.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PdsList'}
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/local/appareils:
+    post:
+      operationId: getDevicesByPds
+      x-ocea-access-mode: read-only
+      summary: Read devices associated with measurement points
+      description: >-
+        The portal sends PDS identifiers and maps the returned device metadata.
+        A supplied request and HTTP 200 list show the same lookup. The
+        integration uses it too. This evidence indicates a query, not an
+        equipment update, but does not establish invisible server effects.
+      requestBody:
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DevicesRequest'}
+      responses:
+        '200':
+          description: Devices associated with the requested points.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeviceList'}
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/local/{localId}/dashboard/consos:
+    parameters:
+      - {$ref: '#/components/parameters/localId'}
+    get:
+      operationId: getDashboardConsumption
+      x-ocea-access-mode: read-only
+      summary: Read dashboard consumption totals
+      responses:
+        '200':
+          description: Dashboard consumption by fluid.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DashboardConsumptionList'}
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/local/{localId}/dashboard/mesures:
+    parameters:
+      - {$ref: '#/components/parameters/localId'}
+    get:
+      operationId: getDashboardMeasurements
+      x-ocea-access-mode: read-only
+      summary: Read dashboard measurements
+      description: >-
+        The portal uses this separate monthly summary for comfort. Its
+        mapping reads fluide, moyenne, unite, and dateDerniereReleve;
+        availability and complete response constraints are unknown.
+      responses:
+        '200':
+          description: Dashboard measurements as used by the portal.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    fluide: {$ref: '#/components/schemas/Fluid'}
+                    moyenne:
+                      description: >-
+                        The portal displays this value or a fallback when absent
+                        or null; the raw numeric representation is unknown.
+                    unite:
+                      description: The portal displays this value or an empty fallback.
+                    dateDerniereReleve:
+                      description: >-
+                        The portal converts this value to a date when present;
+                        the raw date format is unknown.
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/local/{localId}/conso/{fluide}:
+    parameters:
+      - {$ref: '#/components/parameters/localId'}
+      - {$ref: '#/components/parameters/fluide'}
+    post:
+      operationId: getDwellingConsumption
+      x-ocea-access-mode: read-only
+      summary: Read dwelling consumption for a fluid
+      description: >-
+        The portal submits a date range and granularity and graphs the returned
+        dwelling consumption. Both Python clients also request this series.
+        No exchange was supplied for this operation. Portal usage indicates a
+        query, not a consumption update.
+      requestBody: {$ref: '#/components/requestBodies/ConsumptionQuery'}
+      responses:
+        '200': {$ref: '#/components/responses/ConsumptionSeries'}
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/local/{localId}/pds/{pdsId}/conso:
+    parameters:
+      - {$ref: '#/components/parameters/localId'}
+      - {$ref: '#/components/parameters/pdsId'}
+    post:
+      operationId: getPdsConsumption
+      x-ocea-access-mode: read-only
+      summary: Read consumption for a measurement point
+      description: >-
+        The portal submits a date range and granularity to render a graph.
+        Supplied daily and monthly requests and HTTP 200 responses contain
+        consumption readings. Both Python clients request this series.
+        The evidence indicates a query, not an equipment update.
+      requestBody: {$ref: '#/components/requestBodies/ConsumptionQuery'}
+      responses:
+        '200': {$ref: '#/components/responses/ConsumptionSeries'}
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/local/{localId}/comfort/{fluide}:
+    parameters:
+      - {$ref: '#/components/parameters/localId'}
+      - {$ref: '#/components/parameters/fluide'}
+    post:
+      operationId: getComfortMeasurements
+      x-ocea-access-mode: read-only
+      summary: Read comfort measurements
+      description: >-
+        The portal submits date filters and consumes interior measurements for
+        a graph. It uses Temperature and Hygrometrie when advertised for the
+        dwelling, and maps its views to Hour, Day, or Month granularity.
+        No update or equipment control is evident from that use. The supplied
+        captures do not contain this operation.
+      requestBody: {$ref: '#/components/requestBodies/ConsumptionQuery'}
+      responses:
+        '200':
+          description: Measurement response; only the portal's interior fields are known.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Comfort'}
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/local/{localId}/maitriser/{fluideGroupe}:
+    parameters:
+      - {$ref: '#/components/parameters/localId'}
+      - {$ref: '#/components/parameters/fluideGroupe'}
+    get:
+      operationId: getConsumptionInsights
+      x-ocea-access-mode: read-only
+      summary: Read consumption averages and estimated breakdown
+      responses:
+        '200':
+          description: Portal insights; breakdown categories are theoretical.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  consoStart:
+                    description: The portal converts this value to a date when present.
+                  valuePerMonth: {}
+                  valuePerDay: {}
+                  unite: {}
+                  consos:
+                    type: [array, 'null']
+                    description: >-
+                      The portal maps the entries as theoretical breakdown
+                      values; the complete response is unknown.
+                    items:
+                      type: object
+                      properties:
+                        value: {}
+                        consoLabel: {}
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/local/{localId}/alertes/encours:
+    parameters:
+      - {$ref: '#/components/parameters/localId'}
+    get:
+      operationId: getCurrentDwellingAlerts
+      x-ocea-access-mode: read-only
+      summary: Read current dwelling alerts
+      responses:
+        '200': {$ref: '#/components/responses/Alerts'}
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/local/{localId}/alertes/terminees:
+    parameters:
+      - {$ref: '#/components/parameters/localId'}
+    get:
+      operationId: getDwellingAlertHistory
+      x-ocea-access-mode: read-only
+      summary: Read completed dwelling alerts
+      responses:
+        '200': {$ref: '#/components/responses/Alerts'}
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/alerte/depassement/encours:
+    get:
+      operationId: getCurrentThresholdAlerts
+      x-ocea-access-mode: read-only
+      summary: Read current threshold alerts
+      responses:
+        '200': {$ref: '#/components/responses/ThresholdAlerts'}
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+  /api/v1/alerte/depassement/history:
+    get:
+      operationId: getThresholdAlertHistory
+      x-ocea-access-mode: read-only
+      summary: Read threshold alert history
+      responses:
+        '200': {$ref: '#/components/responses/ThresholdAlerts'}
+        '204': {$ref: '#/components/responses/PortalNoContent'}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    localId:
+      name: localId
+      in: path
+      required: true
+      schema: {type: string}
+    pdsId:
+      name: pdsId
+      in: path
+      required: true
+      schema: {type: string}
+    fluide:
+      name: fluide
+      in: path
+      required: true
+      description: >-
+        A fluid identifier. The comfort view uses Temperature and Hygrometrie
+        when advertised; supported values depend on the operation and account.
+      schema:
+        type: string
+        allOf:
+          - {$ref: '#/components/schemas/Fluid'}
+    fluideGroupe:
+      name: fluideGroupe
+      in: path
+      required: true
+      description: >-
+        The portal declares Eau, Chauffage, Thermique, Electricite, Gaz,
+        Temperature, and Hygrometrie as fluid groups. This does not establish
+        which groups are available for this operation or account.
+      schema:
+        type: string
+        examples: [Eau, Chauffage, Thermique, Electricite, Gaz, Temperature, Hygrometrie]
+    codeSite:
+      name: codeSite
+      in: path
+      required: true
+      schema: {type: string}
+  requestBodies:
+    ConsumptionQuery:
+      description: The date range and granularity sent by the portal and client.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ConsumptionQuery'}
+  responses:
+    PortalNoContent:
+      description: The portal client accepts 204; the Python client accepts only 200.
+    ConsumptionSeries:
+      description: Dated consumption series; complete field constraints are unknown.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ConsumptionSeries'}
+    Alerts:
+      description: Dwelling alert list as consumed by the portal.
+      content:
+        application/json:
+          schema:
+            type: array
+            items: {$ref: '#/components/schemas/Alert'}
+    ThresholdAlerts:
+      description: Threshold alert list as consumed by the portal.
+      content:
+        application/json:
+          schema:
+            type: array
+            items: {$ref: '#/components/schemas/ThresholdAlert'}
+  schemas:
+    Fluid:
+      type: [string, 'null']
+      description: >-
+        Fluid identifiers declared by the portal. The list is not a guarantee
+        that every identifier is returned or accepted for every operation.
+        EauFroide is present in the supplied PDS and dashboard observations;
+        the integration accepts null for a PDS fluid.
+      examples:
+        - Rfc
+        - Cetc
+        - Cetf
+        - EauChaude
+        - EauFroide
+        - Radiateur
+        - Gaz
+        - Electricite
+        - NonApplicable
+        - Temperature
+        - Hygrometrie
+        - Air
+        - Fioul
+        - Horaire
+        - DeltaP
+        - CO2
+        - Inconnu
+    ConsumptionUnit:
+      type: [string, 'null']
+      description: >-
+        A consumption unit. The supplied water observations contain m3; the
+        integration also recognizes kWh and accepts null. Other values are not
+        established. The portal displays U for heating allocators; this is not
+        evidence of a raw API unit for every allocator.
+      examples: [m3, kWh]
+    Resident:
+      type: object
+      properties:
+        resident:
+          type: [object, 'null']
+          description: The portal maps resident details when present.
+          properties:
+            nom: {type: [string, 'null']}
+            prenom:
+              type: [string, 'null']
+              description: The integration expects a string when present.
+            isWelcomeModaleDisplayed: {type: [boolean, 'null']}
+            dateAccountDisabled: {type: [string, 'null']}
+            dateLastConnection:
+              type: [string, 'null']
+              description: A date string appears in the supplied observation.
+        occupations:
+          type: [array, 'null']
+          description: The portal maps occupations; the integration expects a list.
+          items:
+            type: object
+            properties:
+              logementId:
+                type: string
+                description: The integration expects a nonempty dwelling identifier.
+              dateDebut:
+                type: [string, 'null']
+                description: >-
+                  A date string appears in the supplied observation. The portal
+                  converts this value to a date; the integration interprets
+                  offset-aware ISO timestamps.
+              dateFin:
+                type: [string, 'null']
+                description: >-
+                  The integration interprets null as an open-ended occupation
+                  and otherwise expects an offset-aware ISO timestamp.
+              typeOccupation:
+                type: [string, 'null']
+                description: >-
+                  The portal declares Proprietaire and Occupant; other values
+                  and server constraints are not established.
+                examples: [Proprietaire, Occupant]
+        notifications:
+          type: [array, 'null']
+          description: The portal reads notification settings when present.
+          items:
+            type: object
+            properties:
+              typeNotificationResident:
+                type: [string, 'null']
+              configurationNotification:
+                type: [object, 'null']
+                properties:
+                  notifMail: {type: [boolean, 'null']}
+                  notifSms: {type: [boolean, 'null']}
+        consentement: {$ref: '#/components/schemas/Consent'}
+        nomClient: {}
+        codeClient: {}
+        logOutCallbackUrl: {}
+    Dwelling:
+      type: object
+      properties:
+        local:
+          type: [object, 'null']
+          description: The portal maps dwelling details; the integration expects an object.
+          properties:
+            adresse:
+              type: [object, 'null']
+              description: >-
+                The integration accepts strings, integers or null for these
+                address components; the observation contains strings.
+              properties:
+                numeroRue: {type: [string, integer, 'null']}
+                complement: {type: [string, integer, 'null']}
+                codePostal: {type: [string, integer, 'null']}
+                ville: {type: [string, integer, 'null']}
+                pays: {type: [string, integer, 'null']}
+            surface:
+              description: Null appears in the supplied observation; other formats are unknown.
+            tantieme:
+              description: A number appears in the supplied observation; other formats are unknown.
+        fluidesRestitues:
+          type: [array, 'null']
+          description: >-
+            Advertised fluids used by the portal to select available views;
+            the integration expects a list. Availability is account-specific.
+          items:
+            type: object
+            properties:
+              fluide: {$ref: '#/components/schemas/Fluid'}
+              typeDistribution:
+                type: [string, 'null']
+                description: >-
+                  The portal declares NonApplicable, CompteurDivisionnaire,
+                  CompteGeneral, SousCompteurGeneral, and Sectorisation.
+              typeReleve: {$ref: '#/components/schemas/ReadingType'}
+        lastOccupation:
+          type: [object, 'null']
+          description: The portal maps the last occupant when present.
+          properties:
+            nom: {type: [string, 'null']}
+            prenom: {type: [string, 'null']}
+            dateDebutOccupation:
+              type: [string, 'null']
+              description: A date string appears in the supplied observation.
+        consentement: {$ref: '#/components/schemas/Consent'}
+    Consent:
+      type: [object, 'null']
+      description: >-
+        Consent information as mapped by the portal; this is distinct from the
+        boolean consentement field on a consumption item.
+      properties:
+        isValid:
+          type: [boolean, 'null']
+          description: >-
+            The portal uses this as a consent validity flag; a boolean appears
+            in the supplied resident and dwelling observations.
+        sourceModificationConsentement:
+          type: [string, 'null']
+          description: >-
+            The portal maps this to a source of modification; a string appears
+            in the supplied observations.
+        lastUpdateConsentement:
+          type: [string, 'null']
+          description: >-
+            The portal converts this to a date when available; a date string
+            appears in the supplied observations. The server format is unknown.
+    ReadingType:
+      type: [string, 'null']
+      description: >-
+        The portal declares NonApplicable, Visuelle, Radio, and Tele.
+        Tele appears in the supplied PDS observation. The integration accepts
+        a string or null when interpreting a supported PDS. Other values may exist.
+      examples: [NonApplicable, Visuelle, Radio, Tele]
+    PdsList:
+      type: array
+      items: {$ref: '#/components/schemas/Pds'}
+    Pds:
+      type: object
+      properties:
+        id:
+          type: [string, integer, 'null']
+          description: The integration accepts strings, integers or null for PDS identifiers.
+        code:
+          type: [string, 'null']
+          description: The integration accepts a string or null for supported PDS.
+        fluide: {$ref: '#/components/schemas/Fluid'}
+        typeReleve: {$ref: '#/components/schemas/ReadingType'}
+        emplacement:
+          type: [string, 'null']
+          description: >-
+            The integration accepts a string or null for supported PDS;
+            strings appear in the supplied observation.
+        fce:
+          type: [number, 'null']
+          description: The integration accepts a number or null for supported PDS.
+    DeviceList:
+      type: array
+      items: {$ref: '#/components/schemas/Device'}
+    Device:
+      type: object
+      properties:
+        id:
+          type: [string, 'null']
+          description: The integration accepts a string or null for a matched device.
+        pdsId:
+          type: [string, integer, 'null']
+          description: The integration accepts a string, integer or null.
+        numeroSerie:
+          type: [string, 'null']
+          description: The integration accepts a string or null for a matched device.
+        fc:
+          type: [number, 'null']
+          description: The integration accepts a number or null for a matched device.
+        datePose:
+          type: [string, 'null']
+          description: >-
+            The integration accepts a string or null for a matched device.
+            The complete server date format is unknown.
+    DevicesRequest:
+      type: object
+      properties:
+        pdsIds:
+          type: array
+          items: {type: string}
+    DashboardConsumptionList:
+      type: array
+      items: {$ref: '#/components/schemas/DashboardConsumption'}
+    DashboardConsumption:
+      type: object
+      properties:
+        fluide: {$ref: '#/components/schemas/Fluid'}
+        valeur:
+          type: [number, string, 'null']
+          description: >-
+            The integration parses numbers and decimal strings, including
+            decimal commas. The supplied dashboard example is a string.
+        unite: {$ref: '#/components/schemas/ConsumptionUnit'}
+    ConsumptionQuery:
+      type: object
+      properties:
+        debut: {type: string}
+        fin: {type: string}
+        granularity:
+          type: string
+          description: >-
+            The portal uses Day and Month for consumption and Hour, Day, and
+            Month for comfort. Day and Month are present in supplied PDS
+            requests; operation-specific server limits remain unknown.
+          examples: [Day, Month, Hour]
+    ConsumptionSeries:
+      type: object
+      properties:
+        unite: {$ref: '#/components/schemas/ConsumptionUnit'}
+        consommations:
+          type: array
+          items: {$ref: '#/components/schemas/ConsumptionItem'}
+    ConsumptionItem:
+      type: object
+      properties:
+        date:
+          type: [string, 'null']
+          description: >-
+            The integration parses ISO dates and timestamps, including offsets;
+            server formats and period boundaries are not established.
+        valeur:
+          type: [number, string, 'null']
+          description: >-
+            The integration parses numbers and decimal strings, including
+            decimal commas. Other values are treated as unavailable.
+        isEstimated:
+          description: >-
+            The integration recognizes boolean or null for known consumption
+            variants, but preserves other values in its unclassified fallback.
+            Booleans appear in the supplied observation.
+        consentement:
+          type: [boolean, 'null']
+          description: >-
+            The integration accepts a boolean or null on consumption items.
+            This is not the resident or dwelling consent object.
+        type:
+          type: [string, 'null']
+          description: >-
+            Consumption variants recognized by the portal and integration
+            include ConsommationResponse, ConsommationEauResponse, and
+            ConsommationRfcResponse; other values may exist.
+          examples: [ConsommationResponse, ConsommationEauResponse, ConsommationRfcResponse]
+        fuiteEstimee:
+          type: [number, string, 'null']
+          description: >-
+            The integration accepts numbers, strings or null. The unit and
+            complete server representation are unknown.
+        valeurCoefficientee:
+          description: >-
+            The integration recognizes numbers, strings or null for heating
+            allocator items; other types remain unclassified.
+        emplacement:
+          description: >-
+            The integration recognizes a string or null for heating allocator
+            items; other types remain unclassified.
+    Comfort:
+      type: object
+      properties:
+        interieur:
+          type: array
+          items:
+            type: object
+            properties:
+              valeurMin:
+                description: The portal uses this as the minimum graph value.
+              valeurAvg:
+                description: >-
+                  The portal multiplies this value and rounds the result for
+                  display. JavaScript coercion does not establish its raw type.
+              valeurMax:
+                description: The portal uses this as the maximum graph value.
+              datePeriode:
+                description: The portal passes this value to its date constructor.
+              unite:
+                description: >-
+                  Raw unit not established. The portal labels its temperature
+                  and humidity graphs in °C and %, respectively; those display
+                  labels do not establish the values returned by the API.
+    Alert:
+      type: object
+      properties:
+        niveau:
+          description: >-
+            The portal declares the levels Zero, Un, Deux, Trois, and
+            NonDetermine. Availability and meaning are not established.
+          examples: [Zero, Un, Deux, Trois, NonDetermine]
+        dateDebut: {}
+        dateFin: {}
+        fluide: {$ref: '#/components/schemas/Fluid'}
+        typeAlerte:
+          description: >-
+            Alert types declared by the portal include Fuite, Declipsage,
+            Depassement, Residuel, and Autre; other values may exist.
+          examples: [Fuite, Declipsage, Depassement, Residuel, Autre]
+        numeroSerieAppareil: {}
+        emplacementAppareil: {}
+        perteTotale: {}
+        debitMoyen: {}
+    ThresholdAlert:
+      type: object
+      properties:
+        dateDebut: {}
+        dateFin: {}
+        fluide: {$ref: '#/components/schemas/Fluid'}
+        numeroSerieAppareil: {}
+        emplacementAppareil: {}
+        volumeDepassement: {}
+        seuil: {}

@@ -6,6 +6,8 @@
 
 Home Assistant integration to monitor water and heating consumption from the [OCEA Smart Building](https://espace-resident.ocea-sb.com) resident portal.
 
+Contributors can consult the independent [read-only API reference](docs/api/README.md).
+
 ## Features
 
 - Dated cold- and hot-water consumption statistics in m³ for each PDS
