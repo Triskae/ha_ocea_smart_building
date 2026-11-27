@@ -1,0 +1,13 @@
+{
+  "unite": "m3",
+  "consommations": [
+    {
+      "fuiteEstimee": 0.0,
+      "date": "2000-01-01T00:00:00.000Z",
+      "valeur": 0.0,
+      "isEstimated": false,
+      "consentement": false,
+      "type": "ConsommationEauResponse"
+    }
+  ]
+}

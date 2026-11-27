@@ -1,0 +1,55 @@
+version: 1
+fixtures:
+  - file: devices/pds-lookup-request.json
+    operationId: getDevicesByPds
+    kind: request
+    schema: '#/components/schemas/DevicesRequest'
+    source: Observed device lookup request during a resident portal session.
+    evidence: observed
+    anonymization: All five PDS identifiers replaced with nonfunctional placeholders.
+  - file: devices/pds-lookup-response.json
+    operationId: getDevicesByPds
+    kind: response
+    status: '200'
+    schema: '#/components/schemas/DeviceList'
+    source: Observed device lookup response during a resident portal session.
+    evidence: observed
+    anonymization: One item retained; identifiers, serial and installation date replaced.
+  - file: pds/list-response.json
+    operationId: getPds
+    kind: response
+    status: '200'
+    schema: '#/components/schemas/PdsList'
+    source: Observed PDS response during a resident portal session.
+    evidence: observed
+    anonymization: One item retained; identifiers, location and coefficient replaced.
+  - file: consumption/dashboard-response.json
+    operationId: getDashboardConsumption
+    kind: response
+    status: '200'
+    schema: '#/components/schemas/DashboardConsumptionList'
+    source: Observed dashboard response during a resident portal session.
+    evidence: observed
+    anonymization: One item retained; consumption value replaced.
+  - file: consumption/pds-day-request.json
+    operationId: getPdsConsumption
+    kind: request
+    schema: '#/components/schemas/ConsumptionQuery'
+    source: Observed daily PDS request during a resident portal session.
+    evidence: observed
+    anonymization: Both dates replaced with fictitious dates.
+  - file: consumption/pds-month-request.json
+    operationId: getPdsConsumption
+    kind: request
+    schema: '#/components/schemas/ConsumptionQuery'
+    source: Observed monthly PDS request during a resident portal session.
+    evidence: observed
+    anonymization: Both dates replaced with fictitious dates.
+  - file: consumption/pds-day-response.json
+    operationId: getPdsConsumption
+    kind: response
+    status: '200'
+    schema: '#/components/schemas/ConsumptionSeries'
+    source: Observed daily PDS response during a resident portal session.
+    evidence: observed
+    anonymization: One reading retained; date, numeric values and boolean flags replaced.

@@ -1,0 +1,175 @@
+version: 1
+# Source references identify declarations and usage in the portal's
+# browser-delivered client code.
+operations:
+  - id: getCurrentThresholdAlerts
+    access: read_only
+    method: GET
+    path: /api/v1/alerte/depassement/encours
+    domain: alerts
+    source: "Portal client: getAlertesDepassementEnCours"
+    evidence: [discovered]
+    observations: []
+    note: Portal displays the current account-level threshold alerts.
+  - id: getThresholdAlertHistory
+    access: read_only
+    method: GET
+    path: /api/v1/alerte/depassement/history
+    domain: alerts
+    source: "Portal client: getAlertesDepassementHistorique"
+    evidence: [discovered]
+    observations: []
+    note: Portal displays the account-level threshold alert history.
+  - id: getDwellingDevices
+    access: read_only
+    method: GET
+    path: /api/v1/local/{localId}/appareils
+    domain: devices
+    source: "Portal client: getAppareilsFromLocalId"
+    evidence: [discovered]
+    observations: []
+    note: Portal maps the returned dwelling devices for display; no exchange was supplied.
+  - id: getDwelling
+    access: read_only
+    method: GET
+    path: /api/v1/local/{localId}
+    domain: dwelling
+    source: "Portal client: getLocal"
+    evidence: [discovered, observed, verified, implemented]
+    observations: [request, response]
+    note: Portal use and an HTTP 200 object agree on dwelling details and advertised fluids.
+  - id: getPds
+    access: read_only
+    method: GET
+    path: /api/v1/local/{localId}/pds
+    domain: pds
+    source: "Portal client: getPointsDeService"
+    evidence: [discovered, observed, verified, implemented]
+    observations: [request, response]
+    note: Portal use and an HTTP 200 list agree on a dwelling measurement-point lookup.
+  - id: getDevicesByPds
+    access: read_only
+    method: POST
+    path: /api/v1/local/appareils
+    domain: devices
+    source: "Portal client: getAppareilsFromPds and equipment lookup"
+    evidence: [discovered, observed, verified, implemented]
+    observations: [request, response]
+    note: Portal use and an HTTP 200 list agree on querying devices by PDS identifiers.
+  - id: getDashboardConsumption
+    access: read_only
+    method: GET
+    path: /api/v1/local/{localId}/dashboard/consos
+    domain: consumption
+    source: "Portal client: getDashboardConsommations"
+    evidence: [discovered, observed, verified, implemented]
+    observations: [request, response]
+    note: Portal use and an HTTP 200 list agree on dashboard consumption data.
+  - id: getDashboardMeasurements
+    access: read_only
+    method: GET
+    path: /api/v1/local/{localId}/dashboard/mesures
+    domain: measurements
+    source: "Portal client: getDashboardMesures and dashboard measurement mapping"
+    evidence: [discovered]
+    observations: []
+    note: Portal maps measurements for a monthly comfort dashboard; raw response is unobserved.
+  - id: getDwellingConsumption
+    access: read_only
+    method: POST
+    path: /api/v1/local/{localId}/conso/{fluide}
+    domain: consumption
+    source: "Portal client: getConsommations"
+    evidence: [discovered, implemented]
+    observations: []
+    note: Portal submits a period and granularity and graphs dwelling consumption; server behavior is unobserved.
+  - id: getPdsConsumption
+    access: read_only
+    method: POST
+    path: /api/v1/local/{localId}/pds/{pdsId}/conso
+    domain: consumption
+    source: "Portal client: getConsommationsPds and consumption graph"
+    evidence: [discovered, observed, verified, implemented]
+    observations: [request, response]
+    note: Portal graph use and HTTP 200 objects agree on period-filtered PDS consumption readings.
+  - id: getComfortMeasurements
+    access: read_only
+    method: POST
+    path: /api/v1/local/{localId}/comfort/{fluide}
+    domain: measurements
+    source: "Portal client: getMesures, comfort measurement mapping and graph"
+    evidence: [discovered]
+    observations: []
+    note: Portal submits a period and granularity and graphs interior measurements; raw response is unobserved.
+  - id: getCurrentDwellingAlerts
+    access: read_only
+    method: GET
+    path: /api/v1/local/{localId}/alertes/encours
+    domain: alerts
+    source: "Portal client: getAlertesEnCours"
+    evidence: [discovered]
+    observations: []
+    note: Portal displays current dwelling alerts after filtering for leaks.
+  - id: getDwellingAlertHistory
+    access: read_only
+    method: GET
+    path: /api/v1/local/{localId}/alertes/terminees
+    domain: alerts
+    source: "Portal client: getAlertesTerminees"
+    evidence: [discovered]
+    observations: []
+    note: Portal displays completed dwelling alerts.
+  - id: getConsumptionInsights
+    access: read_only
+    method: GET
+    path: /api/v1/local/{localId}/maitriser/{fluideGroupe}
+    domain: consumption
+    source: "Portal client: getMaitriserMaConso"
+    evidence: [discovered]
+    observations: []
+    note: Portal displays consumption averages and a theoretical breakdown.
+  - id: getGoal
+    access: read_only
+    method: GET
+    path: /api/v1/objectif
+    domain: resident
+    source: "Portal client: getCurrent"
+    evidence: [discovered]
+    observations: []
+    note: Portal displays the current consumption goals.
+  - id: getResident
+    access: read_only
+    method: GET
+    path: /api/v1/resident
+    domain: resident
+    source: "Portal client: getCurrentResident"
+    evidence: [discovered, observed, verified, implemented]
+    observations: [request, response]
+    note: Portal use and an HTTP 200 object agree on resident and occupation data.
+  - id: getElectricityProfile
+    access: read_only
+    method: GET
+    path: /api/v1/resident/elecType
+    domain: resident
+    source: "Portal client: getResidentElectype and profile display"
+    evidence: [discovered]
+    observations: []
+    note: Portal displays the resident electricity profile; response shape is unobserved.
+  - id: getResidentLinks
+    access: read_only
+    method: GET
+    path: /api/v1/resident/links
+    domain: resident
+    source: "Portal client: getResidentLinks and link display"
+    evidence: [discovered]
+    observations: []
+    note: Portal maps resident links for display; response shape is unobserved.
+  - id: getSite
+    access: read_only
+    method: GET
+    path: /api/v1/site/{codeSite}
+    domain: dwelling
+    source: "Portal client: getSiteConfiguration"
+    evidence: [discovered, observed, verified]
+    observations: [request, response]
+    note: Portal use and an HTTP 200 object agree on a site configuration lookup.

@@ -30,6 +30,10 @@ def _assert_ci_quality_gate(workflow: str) -> None:
     assert "--with homeassistant==2026.7.3" in workflow
     assert "--with pytest-homeassistant-custom-component" in workflow
     assert "python -m pytest -q" in workflow
+    assert 'uvx --from "openapi-spec-validator==0.7.2"' in workflow
+    assert "openapi-spec-validator docs/api/openapi.yaml" in workflow
+    assert '--with "jsonschema==4.25.1" --with pyyaml' in workflow
+    assert "python scripts/validate_api_fixtures.py" in workflow
     assert 'uvx --from "ruff==0.16.1"' in workflow
     assert "ruff check custom_components tests" in workflow
     assert "--with mypy==1.18.2" in workflow
